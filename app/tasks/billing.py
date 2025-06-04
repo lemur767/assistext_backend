@@ -1,6 +1,6 @@
 # app/tasks/billing.py
 from app.models.user import User
-from app.models.twilio_usage import TwilioUsage
+from app.services.subscription_service import TwilioUsage
 from app.services.twilio_service import TwilioService
 from app.extensions import db
 from datetime import datetime
