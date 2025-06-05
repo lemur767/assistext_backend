@@ -1,19 +1,21 @@
-# app/exceptions.py
-
-class TwilioError(Exception):
-    """Base exception for Twilio-related errors"""
+class SignalWireError(Exception):
+    """Base exception for SignalWire-related errors"""
     pass
 
-class TwilioAccountError(TwilioError):
-    """Exception for Twilio account creation/management errors"""
+class SignalWireAccountError(SignalWireError):
+    """Exception for SignalWire account creation/management errors"""
     pass
 
-class TwilioNumberError(TwilioError):
+class SignalWireNumberError(SignalWireError):
     """Exception for phone number-related errors"""
     pass
 
-class TwilioBillingError(TwilioError):
+class SignalWireBillingError(SignalWireError):
     """Exception for billing-related errors"""
+    pass
+
+class SignalWireWebhookError(SignalWireError):
+    """Exception for webhook validation errors"""
     pass
 
 class MessageHandlingError(Exception):
@@ -22,6 +24,18 @@ class MessageHandlingError(Exception):
 
 class AIServiceError(Exception):
     """Exception for AI service integration errors"""
+    pass
+
+class LLMServerError(AIServiceError):
+    """Exception for air-gapped LLM server errors"""
+    pass
+
+class LLMServerTimeoutError(LLMServerError):
+    """Exception for LLM server timeout errors"""
+    pass
+
+class LLMServerUnavailableError(LLMServerError):
+    """Exception when LLM server is completely unavailable"""
     pass
 
 class DatabaseError(Exception):
@@ -34,4 +48,16 @@ class AuthenticationError(Exception):
 
 class ValidationError(Exception):
     """Exception for data validation errors"""
+    pass
+
+class RateLimitError(Exception):
+    """Exception for rate limiting errors"""
+    pass
+
+class ConfigurationError(Exception):
+    """Exception for configuration-related errors"""
+    pass
+
+class VPCNetworkError(Exception):
+    """Exception for VPC network connectivity errors"""
     pass

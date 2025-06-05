@@ -1,3 +1,5 @@
+# requirements.txt - Air-gapped SMS AI Responder (CORRECTED)
+
 # Flask and Extensions
 Flask==2.3.3
 Flask-SQLAlchemy==3.1.1
@@ -7,13 +9,23 @@ Flask-CORS==4.0.0
 Flask-SocketIO==5.3.6
 gunicorn==21.2.0
 
-# Database
+# Database (Updated versions)
 psycopg2-binary==2.9.10
 SQLAlchemy==2.0.41
 
-# Third-party APIs
+# SignalWi
+re (PINNED VERSION - replaces Twilio)
 signalwire
-openai==1.3.8
+
+dotenv
+# REMOVED OpenAI for air-gapped setup
+# openai==1.3.8  # REMOVED - not compatible with air-gapped LLM
+
+# HTTP Client for LLM server communication (ADDED)
+httpx==0.25.0
+aiohttp==3.8.6
+
+# Payment Processing
 stripe==6.7.0
 
 # Task Queue
@@ -28,12 +40,27 @@ bcrypt==4.0.1
 requests==2.31.0
 phonenumbers==8.13.7
 
+# Timezone support (FIXED)
+pytz==2023.3
+
 # Security
 cryptography==41.0.7
+
+# Rate limiting (ADDED)
+Flask-Limiter==3.5.0
+
+# JSON handling (ADDED for performance)
+ujson==5.8.0
 
 # Testing
 pytest==7.4.3
 pytest-cov==4.1.0
+pytest-asyncio==0.21.1
 
-pytz
+# Monitoring (ADDED)
+psutil==5.9.6
 
+# Additional utilities for production
+marshmallow==3.20.1
+flask-marshmallow==0.15.0
+structlog==23.2.0

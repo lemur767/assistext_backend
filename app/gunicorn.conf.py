@@ -17,8 +17,8 @@ max_requests = 1000
 max_requests_jitter = 100
 
 # User and group
-user = "smsapp"
-group = "smsapp"
+user = "admin"
+group = "admin"
 
 # Logging
 errorlog = "/var/log/gunicorn-error.log"

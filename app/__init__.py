@@ -50,7 +50,7 @@ def create_app(config_name='development'):
         ('app.api.webhooks', 'webhooks_bp', '/api/webhooks'),
         ('app.api.clients', 'clients_bp', '/api/clients'),
         ('app.api.billing', 'billing_bp', '/api/billing'),
-        ('app.')
+        
     ]
     
     for module_name, blueprint_name, url_prefix in blueprints:

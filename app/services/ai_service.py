@@ -49,7 +49,7 @@ def generate_ai_response(profile, incoming_message, sender_number):
         response = requests.post(
             f"{current_app.config['LLM_BASE_URL']}/chat",
             json={
-                "model": "dolphin3"
+                "model": "dolphin3",
                 "messages": messages,
                 "stream": False,
                 "options": {
