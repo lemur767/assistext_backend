@@ -16,7 +16,7 @@ def create_app(config_name='development'):
     except Exception as e:
         # Fallback configuration
         app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
-        app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DEV_DATABASE_URL', 'sqlite:///fallback.db')
+        app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DEV_DATABASE_URL', 'postgresql://app_user:AssisText2025!SecureDB@172.234.219.10:5432/assistext_prod?sslmode=require')
         app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
         print(f"Warning: Using fallback config due to: {e}")
     
@@ -85,7 +85,7 @@ def create_app(config_name='development'):
     def health_check():
         return {
             "status": "healthy", 
-            "message": "SMS AI Responder Backend is running",
+            "message": "Assist Text Backend is running",
             "config": config_name
         }
     

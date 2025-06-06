@@ -13,8 +13,7 @@ gunicorn==21.2.0
 psycopg2-binary==2.9.10
 SQLAlchemy==2.0.41
 
-# SignalWi
-re (PINNED VERSION - replaces Twilio)
+# SignalWire (PINNED VERSION - replaces Twilio)
 signalwire
 
 dotenv
@@ -23,7 +22,7 @@ dotenv
 
 # HTTP Client for LLM server communication (ADDED)
 httpx==0.25.0
-aiohttp==3.8.6
+
 
 # Payment Processing
 stripe==6.7.0
