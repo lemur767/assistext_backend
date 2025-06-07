@@ -16,7 +16,7 @@ def create_app(config_name='development'):
     except Exception as e:
         # Fallback configuration
         app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
-        app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DEV_DATABASE_URL', 'sqlite:///fallback.db')
+        app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
         app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
         print(f"Warning: Using fallback config due to: {e}")
     
@@ -50,7 +50,8 @@ def create_app(config_name='development'):
         ('app.api.webhooks', 'webhooks_bp', '/api/webhooks'),
         ('app.api.clients', 'clients_bp', '/api/clients'),
         ('app.api.billing', 'billing_bp', '/api/billing'),
-        
+	('app.api.webhook_management', 'webhook_management_bp', '/api/webhook-management'),
+	('app.api.signup', 'signup_bp', '/api/signup'),        
     ]
     
     for module_name, blueprint_name, url_prefix in blueprints:

@@ -1,58 +1,63 @@
+# app/models/message.py
 from app.extensions import db
 from datetime import datetime
-import json
 
 
 class Message(db.Model):
     __tablename__ = 'messages'
     
     id = db.Column(db.Integer, primary_key=True)
-    profile_id = db.Column(db.Integer, db.ForeignKey('profiles.id'), nullable=False)
+    profile_id = db.Column(db.Integer, db.ForeignKey('profiles.id'), nullable=False, index=True)
+    client_id = db.Column(db.Integer, db.ForeignKey('clients.id'), index=True)
+    sender_number = db.Column(db.String(20), nullable=False, index=True)
     content = db.Column(db.Text, nullable=False)
-    sender_number = db.Column(db.String(20), nullable=False)
-    is_incoming = db.Column(db.Boolean, nullable=False)
+    is_incoming = db.Column(db.Boolean, nullable=False, index=True)
     ai_generated = db.Column(db.Boolean, default=False)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     is_read = db.Column(db.Boolean, default=False)
-    
-    # SignalWire specific fields (replacing Twilio)
-    signalwire_sid = db.Column(db.String(50))
-    send_status = db.Column(db.String(20))  # queued, sending, sent, delivered, failed
+    send_status = db.Column(db.String(20), default='pending')
     send_error = db.Column(db.Text)
-    status_updated_at = db.Column(db.DateTime)
+    twilio_sid = db.Column(db.String(50))
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     
-    # AI processing metadata
-    ai_model_used = db.Column(db.String(50))  # Track which model generated response
-    ai_processing_time = db.Column(db.Float)  # Processing time in seconds
-    ai_fallback_used = db.Column(db.Boolean, default=False)  # If OpenAI fallback was used
-    
-    # Analytics and safety
-    flagged = db.Column(db.Boolean, default=False)
-    conversation_turn = db.Column(db.Integer)  # Position in conversation
+    # FIXED: Using message_metadata instead of metadata
+    message_metadata = db.Column(db.Text)  # JSON string for additional message data
     
     # Relationships
     profile = db.relationship('Profile', back_populates='messages')
-    flagged_details = db.relationship('FlaggedMessage', back_populates='message', uselist=False)
+    client = db.relationship('Client', back_populates='messages')
+    flagged_message = db.relationship('FlaggedMessage', back_populates='message', uselist=False)
+    
+    def get_message_metadata(self):
+        """Get message metadata as dictionary"""
+        if not self.message_metadata:
+            return {}
+        try:
+            import json
+            return json.loads(self.message_metadata)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    
+    def set_message_metadata(self, metadata_dict):
+        """Set message metadata from dictionary"""
+        if metadata_dict:
+            import json
+            self.message_metadata = json.dumps(metadata_dict)
+        else:
+            self.message_metadata = None
     
     def to_dict(self):
         return {
             'id': self.id,
             'profile_id': self.profile_id,
-            'content': self.content,
+            'client_id': self.client_id,
             'sender_number': self.sender_number,
+            'content': self.content,
             'is_incoming': self.is_incoming,
             'ai_generated': self.ai_generated,
-            'timestamp': self.timestamp.isoformat(),
             'is_read': self.is_read,
-            'signalwire_sid': self.signalwire_sid,
             'send_status': self.send_status,
             'send_error': self.send_error,
-            'ai_model_used': self.ai_model_used,
-            'ai_processing_time': self.ai_processing_time,
-            'flagged': self.flagged,
-            'conversation_turn': self.conversation_turn
+            'twilio_sid': self.twilio_sid,
+            'timestamp': self.timestamp.isoformat(),
+            'message_metadata': self.get_message_metadata()
         }
-    
-    def __repr__(self):
-        return f'<Message {self.id}: {self.content[:50]}...>'
-

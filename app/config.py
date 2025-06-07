@@ -35,10 +35,10 @@ class Config:
     
     # VPC Network settings (CORRECTED IPs)
     VPC_SUBNET = os.environ.get('VPC_SUBNET', '10.0.0.0/24')
-    DB_SERVER_IP = os.environ.get('DB_SERVER_IP', '10.0.0.2')
-    REDIS_SERVER_IP = os.environ.get('REDIS_SERVER_IP', '10.0.0.3')
+    DB_SERVER_IP = os.environ.get('DB_SERVER_IP', 'localhost')
+    REDIS_SERVER_IP = os.environ.get('REDIS_SERVER_IP', 'localhost')
     LLM_SERVER_IP = os.environ.get('LLM_SERVER_IP', '10.0.0.4')
-    BACKEND_SERVER_IP = os.environ.get('BACKEND_SERVER_IP', '10.0.0.5')
+    BACKEND_SERVER_IP = os.environ.get('BACKEND_SERVER_IP', '10.0.0.2')
     
     # Base URL for webhook configuration
     BASE_URL = os.environ.get('BASE_URL', 'https://assitext.ca')
@@ -49,13 +49,13 @@ class Config:
     STRIPE_PUBLIC_KEY = os.environ.get('STRIPE_PUBLIC_KEY')
     
     # Redis and Celery configuration (VPC Redis server)
-    REDIS_URL = os.environ.get('REDIS_URL', f'redis://:{os.environ.get("REDIS_PASSWORD", "")}@{os.environ.get("REDIS_SERVER_IP", "10.0.0.3")}:6379/0')
+    REDIS_URL = os.environ.get('REDIS_URL', f'redis://:{os.environ.get("REDIS_PASSWORD", "")}@{os.environ.get("REDIS_SERVER_IP","localhost")}:6379/0')
     CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL') or REDIS_URL
     CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND') or REDIS_URL
     
     # Security and encryption
     ENCRYPTION_KEY = os.environ.get('ENCRYPTION_KEY')  # For encrypting API tokens
-    
+     
     # Rate limiting and safety
     RATELIMIT_STORAGE_URL = os.environ.get('RATELIMIT_STORAGE_URL') or REDIS_URL
     RATELIMIT_STRATEGY = 'fixed-window'
@@ -118,7 +118,7 @@ class DevelopmentConfig(Config):
     
     # Database (VPC database server)
     SQLALCHEMY_DATABASE_URI = os.environ.get('DEV_DATABASE_URL') or \
-        f'postgresql://sms_app:{os.environ.get("DB_PASSWORD", "your_secure_password")}@{Config.DB_SERVER_IP}:5432/escort_sms_dev'
+        f'postgresql://app_user:{os.environ.get("DB_PASSWORD", "AssisText2025!SecureDB")}@{Config.DB_SERVER_IP}:5432/assistext_dev'
     
     # SignalWire signature verification (can be disabled for testing)
     VERIFY_SIGNALWIRE_SIGNATURE = os.environ.get('VERIFY_SIGNALWIRE_SIGNATURE', 'False') == 'True'
@@ -145,7 +145,7 @@ class TestingConfig(Config):
     
     # Database (VPC database server)
     SQLALCHEMY_DATABASE_URI = os.environ.get('TEST_DATABASE_URL') or \
-        f'postgresql://sms_app:{os.environ.get("DB_PASSWORD", "your_secure_password")}@{Config.DB_SERVER_IP}:5432/escort_sms_test'
+        f'postgresql://app_user:{os.environ.get("DB_PASSWORD", "AssisText2025!SecureDB")}@{Config.DB_SERVER_IP}:5432/assistext_test'
     
     # Disable SignalWire signature verification for tests
     VERIFY_SIGNALWIRE_SIGNATURE = False
@@ -170,7 +170,7 @@ class ProductionConfig(Config):
     
     # Database with SSL (VPC database server)
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
-        f'postgresql://sms_app:{os.environ.get("DB_PASSWORD")}@{Config.DB_SERVER_IP}:5432/escort_sms_prod?sslmode=require'
+        f'postgresql://app_user:{os.environ.get("DB_PASSWORD")}@{Config.DB_SERVER_IP}:5432/assistext_prod?sslmode=require'
     
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_recycle': 3600,

@@ -21,6 +21,7 @@ class Profile(db.Model):
     signalwire_sid = db.Column(db.String(50))  # SignalWire phone number SID
     webhook_configured = db.Column(db.Boolean, default=False)
     webhook_url = db.Column(db.String(500))
+
     
     # Performance tracking
     total_messages_received = db.Column(db.Integer, default=0)
