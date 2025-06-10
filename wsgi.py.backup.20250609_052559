@@ -1,0 +1,54 @@
+from flask import Flask, jsonify, request
+from datetime import datetime
+import os
+
+# Create Flask app
+app = Flask(__name__)
+
+# Load environment variables
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+@app.route('/')
+def index():
+    return jsonify({
+        'message': 'AssisText Backend',
+        'status': 'running',
+        'timestamp': datetime.utcnow().isoformat(),
+        'python_version': '3.12',
+        'worker_type': 'sync'
+    })
+
+@app.route('/health')
+@app.route('/api/health')
+def health():
+    return jsonify({
+        'status': 'healthy',
+        'service': 'assistext-backend',
+        'timestamp': datetime.utcnow().isoformat(),
+        'python_version': '3.12'
+    })
+
+@app.route('/api/webhooks/signalwire', methods=['POST'])
+def signalwire_webhook():
+    """SignalWire webhook endpoint"""
+    try:
+        # Get form data
+        message_body = request.form.get('Body', '')
+        from_number = request.form.get('From', '')
+        to_number = request.form.get('To', '')
+        
+        # Log the webhook (you can process this later)
+        print(f"Webhook received: {from_number} -> {to_number}: {message_body}")
+        
+        # Return empty response (required for SignalWire)
+        return '', 204
+    except Exception as e:
+        print(f"Webhook error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+if __name__ == '__main__':
+    app.run(host='127.0.0.1', port=5000, debug=False)
