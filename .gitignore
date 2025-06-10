@@ -1,5 +1,6 @@
 # Environment files
 .env
+<<<<<<< HEAD
 .env.*
 *.env
 
@@ -48,3 +49,8 @@ Thumbs.db
 *.crt
 
 # Sensitive data
+=======
+venv
+env
+.vscode
+>>>>>>> 339eff64647fc3821ce0809099c7a91875f2599a
