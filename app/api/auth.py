@@ -77,7 +77,11 @@ def login():
         return make_response('', 200)
     
     data = request.get_json()
-    
+    additional_claims = {
+        'iss': 'assitext',
+        'sub': str(user.id),
+        'type': 'access'
+    }
     # Validate required fields
     if not all([data.get('username'), data.get('password')]):
         return jsonify({"error": "Missing username or password"}), 400
@@ -88,14 +92,16 @@ def login():
     # Verify credentials
     if not user or not user.check_password(data['password']):
         return jsonify({"error": "Invalid credentials"}), 401
+
     
+  
     # Update last login
     user.last_login = datetime.utcnow()
     db.session.commit()
     
     # Generate tokens
-    access_token = create_access_token(identity=user.id)
-    refresh_token = create_refresh_token(identity=user.id)
+    access_token = create_access_token(identity=user.id,additional_claims=additional_claims)
+    refresh_token = create_refresh_token(identity=user.id,additional_claims=additional_claims)
     
     return jsonify({
         "access_token": access_token,

@@ -9,11 +9,13 @@ class Config:
     """Base configuration with air-gapped LLM and SignalWire integration"""
     
     # Flask core settings
-    SECRET_KEY = os.environ.get('SECRET_KEY') or 'hard-to-guess-string-change-in-production'
-    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY') or 'jwt-secret-key-change-in-production'
+    SECRET_KEY = os.environ.get('SECRET_KEY') or '8432jadf9adskj324j5kkjlpoipafpadfsdfkasdlASAFDAFawerAER'
+    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY') or 'ASDFasfweaadf80a9sdfadfaznfalfafFadsfadfaFASDFSdfa834j'
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
-    JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
+    JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=7)
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    JWT_ENCODE_ISSUER = 'assitext'
+    JWT_ALGORITHM = 'HS256'
     
     # SignalWire configuration (FIXED - using AUTH_TOKEN not API_TOKEN)
     SIGNALWIRE_PROJECT_ID = os.environ.get('SIGNALWIRE_PROJECT_ID')
@@ -24,18 +26,17 @@ class Config:
     
     # Air-gapped LLM server configuration (VPC internal)
     LLM_SERVER_URL = os.environ.get('LLM_SERVER_URL', 'http://10.0.0.4:8080')
-    LLM_MODEL = os.environ.get('LLM_MODEL', 'llama2')  # Default model on your LLM server
+    LLM_MODEL = os.environ.get('LLM_MODEL', 'dolphin-mistral:7b-v2.8')  # Default model on your LLM server
     LLM_TIMEOUT = int(os.environ.get('LLM_TIMEOUT', '30'))  # Timeout in seconds
     LLM_MAX_TOKENS = int(os.environ.get('LLM_MAX_TOKENS', '150'))
     LLM_TEMPERATURE = float(os.environ.get('LLM_TEMPERATURE', '0.7'))
     
-    # NO OpenAI - removed completely for air-gapped setup
-    # OPENAI_API_KEY = None  # Removed
-    # OPENAI_MODEL = None    # Removed
+  
     
     # VPC Network settings (CORRECTED IPs)
     VPC_SUBNET = os.environ.get('VPC_SUBNET', '10.0.0.0/24')
     DB_SERVER_IP = os.environ.get('DB_SERVER_IP', 'localhost')
+    DB_PORT = os.environ.get('DB_PORT', 5432)
     REDIS_SERVER_IP = os.environ.get('REDIS_SERVER_IP', 'localhost')
     LLM_SERVER_IP = os.environ.get('LLM_SERVER_IP', '10.0.0.4')
     BACKEND_SERVER_IP = os.environ.get('BACKEND_SERVER_IP', '10.0.0.2')
@@ -76,18 +77,7 @@ class Config:
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
     LOG_FORMAT = '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
     
-    # Email configuration (for notifications)
-    MAIL_SERVER = os.environ.get('MAIL_SERVER')
-    MAIL_PORT = int(os.environ.get('MAIL_PORT', 587))
-    MAIL_USE_TLS = os.environ.get('MAIL_USE_TLS', 'True') == 'True'
-    MAIL_USERNAME = os.environ.get('MAIL_USERNAME')
-    MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD')
-    MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER')
-    
-    # File upload settings
-    MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
-    UPLOAD_FOLDER = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'uploads')
-    
+      
     # AI and messaging settings (air-gapped specific)
     DEFAULT_AI_TEMPERATURE = float(os.environ.get('DEFAULT_AI_TEMPERATURE', '0.7'))
     DEFAULT_RESPONSE_LENGTH = int(os.environ.get('DEFAULT_RESPONSE_LENGTH', '150'))
@@ -100,6 +90,7 @@ class Config:
         "Hey! Just saw this. I'll message you back shortly 💕",
         "Thanks for reaching out! Give me a moment to respond properly",
         "Hi there! I'll get back to you with a proper response soon ✨"
+        "I am having trouble understanding this :S" 
     ]
     
     # Subscription and billing settings
