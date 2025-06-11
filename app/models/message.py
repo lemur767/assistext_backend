@@ -1,63 +1,62 @@
-# app/models/message.py
-from app.extensions import db
+from app import db
 from datetime import datetime
-
 
 class Message(db.Model):
     __tablename__ = 'messages'
     
     id = db.Column(db.Integer, primary_key=True)
-    profile_id = db.Column(db.Integer, db.ForeignKey('profiles.id'), nullable=False, index=True)
-    client_id = db.Column(db.Integer, db.ForeignKey('clients.id'), index=True)
-    sender_number = db.Column(db.String(20), nullable=False, index=True)
+    profile_id = db.Column(db.Integer, db.ForeignKey('profiles.id'), nullable=False)
     content = db.Column(db.Text, nullable=False)
-    is_incoming = db.Column(db.Boolean, nullable=False, index=True)
+    is_incoming = db.Column(db.Boolean, nullable=False)
+    sender_number = db.Column(db.String(20), nullable=False)
+    
+    # SignalWire specific fields
+    signalwire_message_sid = db.Column(db.String(50))  # SignalWire message SID
+    signalwire_account_sid = db.Column(db.String(50))  # SignalWire account SID
+    signalwire_status = db.Column(db.String(20), default='pending')  # SignalWire delivery status
+    signalwire_error_code = db.Column(db.String(10))   # SignalWire error code if any
+    signalwire_error_message = db.Column(db.Text)      # SignalWire error message
+    
     ai_generated = db.Column(db.Boolean, default=False)
     is_read = db.Column(db.Boolean, default=False)
-    send_status = db.Column(db.String(20), default='pending')
-    send_error = db.Column(db.Text)
-    twilio_sid = db.Column(db.String(50))
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
-    
-    # FIXED: Using message_metadata instead of metadata
-    message_metadata = db.Column(db.Text)  # JSON string for additional message data
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
     profile = db.relationship('Profile', back_populates='messages')
-    client = db.relationship('Client', back_populates='messages')
-    flagged_message = db.relationship('FlaggedMessage', back_populates='message', uselist=False)
-    
-    def get_message_metadata(self):
-        """Get message metadata as dictionary"""
-        if not self.message_metadata:
-            return {}
-        try:
-            import json
-            return json.loads(self.message_metadata)
-        except (json.JSONDecodeError, TypeError):
-            return {}
-    
-    def set_message_metadata(self, metadata_dict):
-        """Set message metadata from dictionary"""
-        if metadata_dict:
-            import json
-            self.message_metadata = json.dumps(metadata_dict)
-        else:
-            self.message_metadata = None
     
     def to_dict(self):
         return {
             'id': self.id,
             'profile_id': self.profile_id,
-            'client_id': self.client_id,
-            'sender_number': self.sender_number,
             'content': self.content,
             'is_incoming': self.is_incoming,
+            'sender_number': self.sender_number,
+            'signalwire_message_sid': self.signalwire_message_sid,
+            'signalwire_account_sid': self.signalwire_account_sid,
+            'signalwire_status': self.signalwire_status,
+            'signalwire_error_code': self.signalwire_error_code,
             'ai_generated': self.ai_generated,
             'is_read': self.is_read,
-            'send_status': self.send_status,
-            'send_error': self.send_error,
-            'twilio_sid': self.twilio_sid,
-            'timestamp': self.timestamp.isoformat(),
-            'message_metadata': self.get_message_metadata()
+            'timestamp': self.timestamp.isoformat()
         }
+    
+    @property
+    def delivery_status(self):
+        """Human-readable delivery status"""
+        status_map = {
+            'pending': 'Pending',
+            'queued': 'Queued',
+            'sending': 'Sending',
+            'sent': 'Sent',
+            'receiving': 'Receiving',
+            'received': 'Received',
+            'delivered': 'Delivered',
+            'undelivered': 'Undelivered',
+            'failed': 'Failed'
+        }
+        return status_map.get(self.signalwire_status, 'Unknown')
+    
+    @property
+    def has_error(self):
+        """Check if message has SignalWire error"""
+        return bool(self.signalwire_error_code or self.signalwire_error_message)

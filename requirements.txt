@@ -14,7 +14,6 @@ psycopg2-binary==2.9.10
 SQLAlchemy==2.0.41
 
 # SignalWire (PINNED VERSION - replaces Twilio)
-signalwire
 
 dotenv
 # REMOVED OpenAI for air-gapped setup
@@ -63,3 +62,6 @@ psutil==5.9.6
 marshmallow==3.20.1
 flask-marshmallow==0.15.0
 structlog==23.2.0
+
+# SignalWire Integration
+signalwire

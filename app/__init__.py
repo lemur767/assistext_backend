@@ -1,97 +1,71 @@
-# app/__init__.py - Clean production version
-import os
 from flask import Flask
 from flask_cors import CORS
+from flask_jwt_extended import JWTManager
+from flask_socketio import SocketIO
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+from app.config import config
+import logging
 
-def create_app(config_name='development'):
-    """Create Flask application"""
-    
-    # Create Flask instance
+# Initialize extensions
+db = SQLAlchemy()
+migrate = Migrate()
+jwt = JWTManager()
+socketio = SocketIO()
+
+def create_app(config_name='production'):
     app = Flask(__name__)
+    app.config.from_object(config[config_name])
     
-    # Load configuration
-    try:
-        from app.config import config
-        app.config.from_object(config[config_name])
-    except Exception as e:
-        # Fallback configuration
-        app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
-<<<<<<< HEAD
-        app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
-=======
-        app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DEV_DATABASE_URL', 'postgresql://app_user:AssisText2025!SecureDB@172.234.219.10:5432/assistext_prod?sslmode=require')
->>>>>>> 339eff64647fc3821ce0809099c7a91875f2599a
-        app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-        print(f"Warning: Using fallback config due to: {e}")
+    # Set up logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
     
-    # Initialize CORS
-    CORS(app)
-    
-    # Initialize extensions
-    try:
-        from app.extensions import db, migrate, jwt, socketio
-        
-        db.init_app(app)
-        migrate.init_app(app, db)
-        jwt.init_app(app)
-        socketio.init_app(app, cors_allowed_origins="*")
-        
-        # Initialize Celery if available
-        try:
-            from app.extensions import init_celery
-            init_celery(app)
-        except ImportError:
-            pass  # Celery is optional
-            
-    except Exception as e:
-        print(f"Warning: Extension initialization failed: {e}")
+    # Initialize extensions with app
+    CORS(app, origins=['https://assitext.ca', 'https://www.assitext.ca'])
+    db.init_app(app)
+    migrate.init_app(app, db)
+    jwt.init_app(app)
+    socketio.init_app(app, cors_allowed_origins="*")
     
     # Register blueprints
-    blueprints = [
-        ('app.api.auth', 'auth_bp', '/api/auth'),
-        ('app.api.profiles', 'profiles_bp', '/api/profiles'),
-        ('app.api.messages', 'messages_bp', '/api/messages'),
-        ('app.api.webhooks', 'webhooks_bp', '/api/webhooks'),
-        ('app.api.clients', 'clients_bp', '/api/clients'),
-        ('app.api.billing', 'billing_bp', '/api/billing'),
-	('app.api.webhook_management', 'webhook_management_bp', '/api/webhook-management'),
-	('app.api.signup', 'signup_bp', '/api/signup'),        
-    ]
+    from app.api.auth import auth_bp
+    from app.api.profiles import profiles_bp
+    from app.api.messages import messages_bp
+    from app.api.webhooks import webhooks_bp
+    from app.api.health import health_bp
+    from app.api.dashboard import dashboard_bp
     
-    for module_name, blueprint_name, url_prefix in blueprints:
-        try:
-            module = __import__(module_name, fromlist=[blueprint_name])
-            blueprint = getattr(module, blueprint_name)
-            app.register_blueprint(blueprint, url_prefix=url_prefix)
-        except ImportError:
-            # Blueprint not found - that's okay, some might not exist yet
-            pass
-        except Exception as e:
-            print(f"Warning: Failed to register {blueprint_name}: {e}")
+    app.register_blueprint(auth_bp, url_prefix='/api/auth')
+    app.register_blueprint(profiles_bp, url_prefix='/api/profiles')
+    app.register_blueprint(messages_bp, url_prefix='/api/messages')
+    app.register_blueprint(webhooks_bp, url_prefix='/api/webhooks')
+    app.register_blueprint(health_bp, url_prefix='/api')
+    app.register_blueprint(dashboard_bp, url_prefix='/api/dashboard')
     
     # JWT error handlers
-    try:
-        @jwt.expired_token_loader
-        def expired_token_callback(jwt_header, jwt_payload):
-            return {'message': 'Token has expired'}, 401
-        
-        @jwt.invalid_token_loader
-        def invalid_token_callback(error):
-            return {'message': 'Invalid token'}, 401
-        
-        @jwt.unauthorized_loader
-        def missing_token_callback(error):
-            return {'message': 'Authorization token is required'}, 401
-    except Exception:
-        pass  # JWT handlers are optional if JWT isn't available
+    @jwt.expired_token_loader
+    def expired_token_callback(jwt_header, jwt_payload):
+        return {'message': 'Token has expired'}, 401
     
-    # Add basic health check route
-    @app.route('/')
-    def health_check():
-        return {
-            "status": "healthy", 
-            "message": "Assist Text Backend is running",
-            "config": config_name
-        }
+    @jwt.invalid_token_loader
+    def invalid_token_callback(error):
+        return {'message': 'Invalid token'}, 401
+    
+    # Initialize SignalWire after app context is ready
+    @app.before_first_request
+    def initialize_integrations():
+        """Initialize SignalWire integration"""
+        try:
+            from app.services.signalwire_service import initialize_signalwire_integration
+            result = initialize_signalwire_integration()
+            
+            if result['success']:
+                logger.info("SignalWire integration initialized successfully")
+            else:
+                logger.error(f"SignalWire initialization failed: {result.get('error', 'Unknown error')}")
+                
+        except Exception as e:
+            logger.error(f"Integration initialization failed: {str(e)}")
     
     return app

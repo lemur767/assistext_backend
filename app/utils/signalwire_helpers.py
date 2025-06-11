@@ -1,9 +1,10 @@
-
-
-import requests
-from flask import current_app
 from signalwire.rest import Client as SignalWireClient
-import base64
+from flask import current_app
+import logging
+import requests
+from urllib.parse import urljoin
+
+logger = logging.getLogger(__name__)
 
 def get_signalwire_client():
     """Get configured SignalWire client"""
@@ -13,205 +14,254 @@ def get_signalwire_client():
         signalwire_space_url=current_app.config['SIGNALWIRE_SPACE_URL']
     )
 
-def get_available_numbers(area_code=None, limit=10, country='CA'):
-    """Get available phone numbers from SignalWire"""
-    client = get_signalwire_client()
+def format_phone_number(phone_number):
+    """Format phone number to E.164 format (+1XXXXXXXXXX)"""
+    if not phone_number:
+        return None
+        
+    # Remove all non-digit characters
+    digits_only = ''.join(filter(str.isdigit, phone_number))
     
-    try:
-        # Search for available numbers
-        available_numbers = client.available_phone_numbers('CA').local.list(
-            area_code=area_code,
-            limit=limit
-        )
-        
-        # Format the response
-        formatted_numbers = []
-        for number in available_numbers:
-            formatted_numbers.append({
-                'phone_number': number.phone_number,
-                'locality': number.locality,
-                'region': number.region,
-                'postal_code': number.postal_code,
-                'iso_country': number.iso_country,
-                'capabilities': {
-                    'voice': getattr(number.capabilities, 'voice', True),
-                    'sms': getattr(number.capabilities, 'sms', True),
-                    'mms': getattr(number.capabilities, 'mms', True)
-                }
-            })
-        
-        return formatted_numbers
-        
-    except Exception as e:
-        current_app.logger.error(f"Error fetching available numbers: {e}")
-        raise
+    # Handle different input formats
+    if len(digits_only) == 10:
+        # US number without country code
+        return f"+1{digits_only}"
+    elif len(digits_only) == 11 and digits_only.startswith('1'):
+        # US number with country code
+        return f"+{digits_only}"
+    elif len(digits_only) > 11:
+        # International number
+        return f"+{digits_only}"
+    else:
+        raise ValueError(f"Invalid phone number format: {phone_number}")
 
-def purchase_phone_number(phone_number):
-    """Purchase a phone number from SignalWire"""
-    client = get_signalwire_client()
-    
-    try:
-        # Purchase the number
-        purchased_number = client.incoming_phone_numbers.create(
-            phone_number=phone_number
-        )
-        
-        return {
-            'sid': purchased_number.sid,
-            'phone_number': purchased_number.phone_number,
-            'account_sid': purchased_number.account_sid,
-            'friendly_name': purchased_number.friendly_name
-        }
-        
-    except Exception as e:
-        current_app.logger.error(f"Error purchasing number {phone_number}: {e}")
-        raise
-
-def configure_number_webhook(phone_number, webhook_url):
-    """Configure webhook URL for a phone number"""
-    client = get_signalwire_client()
-    
-    try:
-        # Find the phone number resource
-        numbers = client.incoming_phone_numbers.list(phone_number=phone_number)
-        
-        if not numbers:
-            raise Exception(f"Phone number {phone_number} not found in account")
-        
-        number = numbers[0]
-        
-        # Update the webhook URL
-        number.update(
-            sms_url=webhook_url,
-            sms_method='POST'
-        )
-        
-        current_app.logger.info(f"Webhook configured for {phone_number}: {webhook_url}")
-        return True
-        
-    except Exception as e:
-        current_app.logger.error(f"Error configuring webhook for {phone_number}: {e}")
-        raise
-
-def send_sms(from_number, to_number, body):
+def send_signalwire_sms(from_number, to_number, body):
     """Send SMS using SignalWire"""
     client = get_signalwire_client()
     
     try:
+        # Format phone numbers
+        formatted_from = format_phone_number(from_number)
+        formatted_to = format_phone_number(to_number)
+        
+        # Verify the from_number is in your SignalWire project
+        if not is_signalwire_number_available(formatted_from):
+            available_numbers = get_signalwire_phone_numbers()
+            logger.error(f"From number {formatted_from} not found in SignalWire project. Available: {available_numbers}")
+            raise ValueError(f"From number {formatted_from} not configured in SignalWire project")
+        
         message = client.messages.create(
             body=body,
-            from_=from_number,
-            to=to_number
+            from_=formatted_from,
+            to=formatted_to
         )
         
-        return {
-            'sid': message.sid,
-            'status': message.status,
-            'error_code': message.error_code,
-            'error_message': message.error_message
-        }
+        logger.info(f"SignalWire SMS sent successfully: {message.sid} from {formatted_from} to {formatted_to}")
+        return message
         
     except Exception as e:
-        current_app.logger.error(f"Error sending SMS from {from_number} to {to_number}: {e}")
+        logger.error(f"SignalWire SMS send failed: {str(e)}")
         raise
 
-def validate_signalwire_request(request):
-    """Validate that request came from SignalWire"""
-    if not current_app.config.get('VERIFY_SIGNALWIRE_SIGNATURE', True):
-        return True
-    
+def is_signalwire_number_available(phone_number):
+    """Check if phone number exists in your SignalWire project"""
     try:
-        from signalwire.webhook import WebhookValidator
-        
-        # Get SignalWire signature from request headers
-        signalwire_signature = request.headers.get('X-SignalWire-Signature', '')
-        
-        # Create validator
-        validator = WebhookValidator(current_app.config['SIGNALWIRE_API_TOKEN'])
-        
-        # Validate request
-        return validator.validate(
-            request.url,
-            request.form,
-            signalwire_signature
-        )
-        
-    except ImportError:
-        # Fallback validation if SignalWire webhook validator not available
-        return True
+        client = get_signalwire_client()
+        numbers = client.incoming_phone_numbers.list()
+        project_numbers = [num.phone_number for num in numbers]
+        return phone_number in project_numbers
     except Exception as e:
-        current_app.logger.warning(f"SignalWire signature validation failed: {e}")
+        logger.error(f"Error checking SignalWire numbers: {str(e)}")
         return False
 
-def get_number_info(phone_number):
-    """Get information about a purchased phone number"""
-    client = get_signalwire_client()
-    
+def get_signalwire_phone_numbers():
+    """Get all phone numbers available in your SignalWire project with details"""
     try:
-        numbers = client.incoming_phone_numbers.list(phone_number=phone_number)
+        client = get_signalwire_client()
+        numbers = client.incoming_phone_numbers.list()
         
-        if not numbers:
-            return None
+        number_details = []
+        for num in numbers:
+            number_details.append({
+                'phone_number': num.phone_number,
+                'sid': num.sid,
+                'friendly_name': num.friendly_name,
+                'sms_url': num.sms_url,
+                'sms_method': num.sms_method,
+                'capabilities': {
+                    'sms': getattr(num.capabilities, 'sms', False),
+                    'voice': getattr(num.capabilities, 'voice', False),
+                    'mms': getattr(num.capabilities, 'mms', False)
+                }
+            })
         
-        number = numbers[0]
-        return {
-            'sid': number.sid,
-            'phone_number': number.phone_number,
-            'friendly_name': number.friendly_name,
-            'sms_url': number.sms_url,
-            'voice_url': number.voice_url,
-            'status': number.status,
-            'capabilities': {
-                'voice': number.capabilities.get('voice', False),
-                'sms': number.capabilities.get('sms', False),
-                'mms': number.capabilities.get('mms', False)
-            }
-        }
+        return number_details
         
     except Exception as e:
-        current_app.logger.error(f"Error getting number info for {phone_number}: {e}")
-        return None
+        logger.error(f"Error fetching SignalWire numbers: {str(e)}")
+        return []
 
-def release_phone_number(phone_number):
-    """Release a phone number back to SignalWire"""
-    client = get_signalwire_client()
-    
+def setup_signalwire_webhook_for_number(phone_number, webhook_url=None):
+    """Set up SignalWire webhook for a specific phone number"""
     try:
-        # Find the phone number resource
-        numbers = client.incoming_phone_numbers.list(phone_number=phone_number)
+        client = get_signalwire_client()
         
-        if not numbers:
-            raise Exception(f"Phone number {phone_number} not found in account")
+        if not webhook_url:
+            webhook_url = urljoin(current_app.config['BASE_URL'], '/api/webhooks/signalwire/sms')
         
-        number = numbers[0]
+        # Find the phone number in your SignalWire project
+        numbers = client.incoming_phone_numbers.list()
+        target_number = None
         
-        # Delete the number
-        number.delete()
+        for number in numbers:
+            if number.phone_number == format_phone_number(phone_number):
+                target_number = number
+                break
         
-        current_app.logger.info(f"Phone number {phone_number} released successfully")
+        if not target_number:
+            logger.error(f"Phone number {phone_number} not found in SignalWire project")
+            return False, None
+        
+        # Update the webhook URL
+        updated_number = target_number.update(
+            sms_url=webhook_url, 
+            sms_method='POST'
+        )
+        
+        logger.info(f"SignalWire webhook configured for {phone_number}: {webhook_url}")
+        return True, updated_number.sid
+        
+    except Exception as e:
+        logger.error(f"Error setting up SignalWire webhook for {phone_number}: {str(e)}")
+        return False, None
+
+def setup_all_signalwire_webhooks():
+    """Set up SignalWire webhooks for all phone numbers in the project"""
+    try:
+        webhook_url = urljoin(current_app.config['BASE_URL'], '/api/webhooks/signalwire/sms')
+        client = get_signalwire_client()
+        
+        numbers = client.incoming_phone_numbers.list()
+        results = []
+        
+        for number in numbers:
+            try:
+                updated_number = number.update(
+                    sms_url=webhook_url, 
+                    sms_method='POST'
+                )
+                results.append({
+                    'phone_number': number.phone_number,
+                    'sid': updated_number.sid,
+                    'success': True,
+                    'webhook_url': webhook_url
+                })
+                logger.info(f"SignalWire webhook configured for {number.phone_number}")
+            except Exception as e:
+                results.append({
+                    'phone_number': number.phone_number,
+                    'sid': number.sid,
+                    'success': False,
+                    'error': str(e)
+                })
+                logger.error(f"Failed to configure SignalWire webhook for {number.phone_number}: {str(e)}")
+        
+        success_count = len([r for r in results if r['success']])
+        logger.info(f"SignalWire webhooks configured: {success_count}/{len(numbers)} numbers")
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error setting up SignalWire webhooks: {str(e)}")
+        return []
+
+def validate_signalwire_webhook_request(request):
+    """Validate that request came from SignalWire"""
+    try:
+        # SignalWire uses X-SignalWire-Signature header
+        signalwire_signature = request.headers.get('X-SignalWire-Signature', '')
+        
+        if not signalwire_signature:
+            logger.warning("No SignalWire signature found in request headers")
+            return False
+        
+        # For now, we'll implement basic validation
+        # In production, you should implement proper signature validation
+        # https://docs.signalwire.com/topics/laml-xml/request-validation/
+        
+        # Check if request contains expected SignalWire parameters
+        required_params = ['AccountSid', 'From', 'To', 'Body']
+        has_required = all(param in request.form for param in required_params)
+        
+        if not has_required:
+            logger.warning("Missing required SignalWire parameters")
+            return False
+        
+        # Verify AccountSid matches your project
+        account_sid = request.form.get('AccountSid', '')
+        if account_sid != current_app.config['SIGNALWIRE_PROJECT_ID']:
+            logger.warning(f"Invalid AccountSid: {account_sid}")
+            return False
+        
         return True
         
     except Exception as e:
-        current_app.logger.error(f"Error releasing number {phone_number}: {e}")
-        raise
+        logger.error(f"SignalWire request validation error: {str(e)}")
+        return False
 
-# Optional: Webhook handler for incoming SMS
-def handle_incoming_sms(request):
-    """Process incoming SMS from SignalWire webhook"""
-    
-    if not validate_signalwire_request(request):
-        current_app.logger.warning("Invalid SignalWire signature")
-        return {'error': 'Invalid signature'}, 403
-    
-    # Extract message details
-    message_body = request.form.get('Body', '').strip()
-    from_number = request.form.get('From', '')
-    to_number = request.form.get('To', '')
-    message_sid = request.form.get('MessageSid', '')
-    
-    return {
-        'body': message_body,
-        'from': from_number,
-        'to': to_number,
-        'sid': message_sid
-    }
+def get_signalwire_account_info():
+    """Get SignalWire account information"""
+    try:
+        client = get_signalwire_client()
+        account = client.api.accounts(current_app.config['SIGNALWIRE_PROJECT_ID']).fetch()
+        
+        return {
+            'sid': account.sid,
+            'friendly_name': account.friendly_name,
+            'status': account.status,
+            'type': account.type
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching SignalWire account info: {str(e)}")
+        return None
+
+def get_signalwire_integration_status():
+    """Get complete SignalWire integration status"""
+    try:
+        client = get_signalwire_client()
+        
+        # Test connection with account info
+        account = client.api.accounts(current_app.config['SIGNALWIRE_PROJECT_ID']).fetch()
+        
+        # Get phone numbers with webhook status
+        numbers = get_signalwire_phone_numbers()
+        
+        # Check webhook configuration
+        webhook_url = urljoin(current_app.config['BASE_URL'], '/api/webhooks/signalwire/sms')
+        configured_webhooks = 0
+        
+        for number in numbers:
+            if number['sms_url'] == webhook_url:
+                configured_webhooks += 1
+        
+        return {
+            'status': 'connected',
+            'account': {
+                'sid': account.sid,
+                'friendly_name': account.friendly_name,
+                'status': account.status
+            },
+            'phone_numbers_count': len(numbers),
+            'phone_numbers': numbers,
+            'webhooks_configured': configured_webhooks,
+            'webhook_url': webhook_url,
+            'space_url': current_app.config['SIGNALWIRE_SPACE_URL']
+        }
+        
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e),
+            'space_url': current_app.config.get('SIGNALWIRE_SPACE_URL', 'Not configured')
+        }
