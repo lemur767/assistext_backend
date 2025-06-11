@@ -101,7 +101,7 @@ def login():
     
     # Generate tokens
     access_token = create_access_token(identity=user.id,additional_claims=additional_claims)
-    refresh_token = create_refresh_token(identity=user.id,additional_claims=additional_claims)
+    refresh_token = create_refresh_token(identity=user.id,additional_claims=additional_claims   )
     
     return jsonify({
         "access_token": access_token,
