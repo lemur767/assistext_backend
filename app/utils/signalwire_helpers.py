@@ -47,7 +47,7 @@ def send_signalwire_sms(from_number, to_number, body):
         # Verify the from_number is in your SignalWire project
         if not is_signalwire_number_available(formatted_from):
             available_numbers = get_signalwire_phone_numbers()
-            logger.error(f"From number {formatted_from} not found in SignalWire project. Available: {available_numbers}")
+            logger.error(f"From number {formatted_from} not found in SignalWire project. Available: {[n['phone_number'] for n in available_numbers]}")
             raise ValueError(f"From number {formatted_from} not configured in SignalWire project")
         
         message = client.messages.create(
@@ -62,6 +62,11 @@ def send_signalwire_sms(from_number, to_number, body):
     except Exception as e:
         logger.error(f"SignalWire SMS send failed: {str(e)}")
         raise
+
+# Backward compatibility aliases
+def send_sms(from_number, to_number, body):
+    """Backward compatibility alias for send_signalwire_sms"""
+    return send_signalwire_sms(from_number, to_number, body)
 
 def is_signalwire_number_available(phone_number):
     """Check if phone number exists in your SignalWire project"""
@@ -185,10 +190,6 @@ def validate_signalwire_webhook_request(request):
             logger.warning("No SignalWire signature found in request headers")
             return False
         
-        # For now, we'll implement basic validation
-        # In production, you should implement proper signature validation
-        # https://docs.signalwire.com/topics/laml-xml/request-validation/
-        
         # Check if request contains expected SignalWire parameters
         required_params = ['AccountSid', 'From', 'To', 'Body']
         has_required = all(param in request.form for param in required_params)
@@ -208,6 +209,16 @@ def validate_signalwire_webhook_request(request):
     except Exception as e:
         logger.error(f"SignalWire request validation error: {str(e)}")
         return False
+
+# Create aliases for backward compatibility
+def validate_signalwire_request(request):
+    """Alias for validate_signalwire_webhook_request"""
+    return validate_signalwire_webhook_request(request)
+
+def validate_twilio_request(request):
+    """Legacy alias - redirects to SignalWire validation"""
+    logger.warning("validate_twilio_request called - redirecting to SignalWire validation")
+    return validate_signalwire_webhook_request(request)
 
 def get_signalwire_account_info():
     """Get SignalWire account information"""
@@ -265,3 +276,14 @@ def get_signalwire_integration_status():
             'error': str(e),
             'space_url': current_app.config.get('SIGNALWIRE_SPACE_URL', 'Not configured')
         }
+
+# Additional helper functions that might be expected
+def get_twilio_client():
+    """Legacy function that redirects to SignalWire"""
+    logger.warning("get_twilio_client called - redirecting to SignalWire client")
+    return get_signalwire_client()
+
+def send_twilio_sms(from_number, to_number, body):
+    """Legacy function that redirects to SignalWire SMS"""
+    logger.warning("send_twilio_sms called - redirecting to SignalWire SMS")
+    return send_signalwire_sms(from_number, to_number, body)

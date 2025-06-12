@@ -1,6 +1,6 @@
 from app.models.profile import Profile
 from app.models.message import Message
-from app.utils.signalwire_helpers import send_signalwire_sms
+from app.utils.signalwire_helpers import send_signalwire_sms  # Use correct function name
 from app import db
 from datetime import datetime
 import logging
@@ -188,7 +188,7 @@ def is_within_business_hours(profile):
             return start_minutes <= current_minutes <= end_minutes
         
     except Exception as e:
-        logger.error(f"Error checking business hours: {str(e)}")
+        logger.error(f"Error checking business hours: {e}")
         return True  # Default to available
 
 def check_keyword_responses(profile, message_text):

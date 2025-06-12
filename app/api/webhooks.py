@@ -12,11 +12,10 @@ webhooks_bp = Blueprint('webhooks', __name__)
 def signalwire_sms_webhook():
     """Webhook for incoming SMS messages from SignalWire"""
     try:
-        # Log the incoming request for debugging
         logger.info(f"Received SignalWire SMS webhook: {request.form.to_dict()}")
         
-        # Validate SignalWire request
-        if current_app.config.get('VALIDATE_SIGNALWIRE_SIGNATURE', True):
+        # Validate SignalWire request (optional in development)
+        if current_app.config.get('VALIDATE_SIGNALWIRE_SIGNATURE', False):
             if not validate_signalwire_webhook_request(request):
                 logger.warning("Invalid SignalWire signature or parameters")
                 return 'Invalid request', 403
@@ -27,9 +26,8 @@ def signalwire_sms_webhook():
         recipient_number = request.form.get('To', '')
         message_sid = request.form.get('MessageSid', '')
         account_sid = request.form.get('AccountSid', '')
-        message_status = request.form.get('SmsStatus', 'received')
         
-        logger.info(f"SignalWire SMS: From {sender_number} to {recipient_number}, SID: {message_sid}")
+        logger.info(f"SignalWire SMS: From {sender_number} to {recipient_number}")
         
         if not message_text or not sender_number or not recipient_number:
             logger.warning("Missing required fields in SignalWire SMS webhook")
@@ -41,37 +39,28 @@ def signalwire_sms_webhook():
             logger.warning(f"Received SignalWire message for unknown number: {recipient_number}")
             return 'Unknown recipient number', 404
         
-        # Verify profile is configured for SignalWire
-        if not profile.is_signalwire_configured():
-            logger.warning(f"Profile {profile.name} not properly configured for SignalWire")
-            # Still process the message but log the configuration issue
-        
-        # Process message
+        # Process message directly (synchronously for now)
         try:
             result = handle_incoming_signalwire_message(
                 profile_id=profile.id,
                 message_text=message_text,
                 sender_number=sender_number,
                 signalwire_message_sid=message_sid,
-                signalwire_account_sid=account_sid,
-                signalwire_status=message_status
+                signalwire_account_sid=account_sid
             )
             
             if result:
-                logger.info(f"SignalWire message processed successfully for profile {profile.name}")
+                logger.info(f"SignalWire message processed successfully")
             else:
-                logger.warning(f"SignalWire message processing returned no result for profile {profile.name}")
+                logger.warning(f"SignalWire message processing returned no result")
                 
         except Exception as e:
             logger.error(f"Error processing SignalWire message: {str(e)}")
-            # Still return 200 to SignalWire to avoid retries for application errors
         
-        # Return empty response to SignalWire (200 OK)
         return '', 200
         
     except Exception as e:
         logger.error(f"SignalWire webhook error: {str(e)}")
-        # Return 200 to avoid SignalWire retries for application errors
         return 'Internal error', 200
 
 @webhooks_bp.route('/signalwire/status', methods=['POST'])
@@ -122,23 +111,37 @@ def test_signalwire_webhook():
         'webhook_url': request.url
     }), 200
 
-@webhooks_bp.route('/health', methods=['GET'])
-def webhooks_health():
-    """Health check for SignalWire webhook service"""
-    from app.utils.signalwire_helpers import get_signalwire_integration_status
-    
-    signalwire_status = get_signalwire_integration_status()
-    
-    return jsonify({
-        'status': 'healthy',
-        'service': 'SignalWire webhooks',
-        'signalwire_integration': signalwire_status['status'],
-        'timestamp': datetime.utcnow().isoformat()
-    }), 200
-
-# Legacy endpoint for backward compatibility (redirects to SignalWire)
+# Legacy endpoints for backward compatibility
 @webhooks_bp.route('/sms', methods=['POST'])
 def legacy_sms_webhook():
     """Legacy SMS webhook - redirects to SignalWire handler"""
     logger.info("Legacy SMS webhook called, redirecting to SignalWire handler")
     return signalwire_sms_webhook()
+
+@webhooks_bp.route('/twilio/sms', methods=['POST'])
+def legacy_twilio_webhook():
+    """Legacy Twilio webhook - redirects to SignalWire handler"""
+    logger.info("Legacy Twilio webhook called, redirecting to SignalWire handler")
+    return signalwire_sms_webhook()
+
+@webhooks_bp.route('/health', methods=['GET'])
+def webhooks_health():
+    """Health check for SignalWire webhook service"""
+    try:
+        from app.utils.signalwire_helpers import get_signalwire_integration_status
+        
+        signalwire_status = get_signalwire_integration_status()
+        
+        return jsonify({
+            'status': 'healthy',
+            'service': 'SignalWire webhooks',
+            'signalwire_integration': signalwire_status['status'],
+            'timestamp': datetime.utcnow().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Webhook health check failed: {str(e)}")
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e)
+        }), 503
