@@ -15,7 +15,7 @@ BLUEPRINT_CONFIGS = [
     ('billing', '/api/billing'),
     ('text_examples', '/api/text_examples'),
     ('ai_settings', '/api/ai_settings'),
-    ('twilio', '/api/twilio'),
+    ('signalwire', '/api/signalwire'),
 ]
 
 def get_blueprint_by_name(name):

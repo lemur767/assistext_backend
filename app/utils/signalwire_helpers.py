@@ -276,7 +276,120 @@ def get_signalwire_integration_status():
             'error': str(e),
             'space_url': current_app.config.get('SIGNALWIRE_SPACE_URL', 'Not configured')
         }
+# Add these functions to your app/utils/signalwire_helpers.py if they don't exist
 
+def get_available_phone_numbers(area_code=None, country='CA', limit=20):
+    """Get available phone numbers from SignalWire"""
+    try:
+        client = get_signalwire_client()
+        
+        search_params = {
+            'limit': limit,
+            'sms_enabled': True
+        }
+        
+        if area_code:
+            search_params['area_code'] = area_code
+            
+        if country.upper() == 'CA':
+            numbers = client.available_phone_numbers('CA').list(**search_params)
+        else:
+            numbers = client.available_phone_numbers('US').list(**search_params)
+        
+        return [
+            {
+                'phone_number': num.phone_number,
+                'locality': getattr(num, 'locality', None),
+                'region': getattr(num, 'region', None),
+                'price': '1.00'
+            }
+            for num in numbers
+        ]
+        
+    except Exception as e:
+        logger.error(f"Error getting available numbers: {e}")
+        return []
+
+def purchase_phone_number(phone_number, friendly_name=None, subaccount_sid=None):
+    """Purchase a phone number"""
+    try:
+        client = get_signalwire_client()
+        
+        purchase_params = {
+            'phone_number': phone_number
+        }
+        
+        if friendly_name:
+            purchase_params['friendly_name'] = friendly_name
+            
+        if subaccount_sid:
+            purchase_params['account_sid'] = subaccount_sid
+        
+        purchased_number = client.incoming_phone_numbers.create(**purchase_params)
+        
+        return {
+            'sid': purchased_number.sid,
+            'phone_number': purchased_number.phone_number,
+            'friendly_name': purchased_number.friendly_name,
+            'status': 'active'
+        }
+        
+    except Exception as e:
+        logger.error(f"Error purchasing phone number {phone_number}: {e}")
+        raise Exception(f"Failed to purchase phone number: {str(e)}")
+
+def configure_number_webhook(phone_number, webhook_url):
+    """Configure webhook for a phone number"""
+    try:
+        client = get_signalwire_client()
+        
+        # Find the phone number
+        numbers = client.incoming_phone_numbers.list(phone_number=phone_number)
+        
+        if not numbers:
+            raise Exception(f"Phone number {phone_number} not found in account")
+        
+        number = numbers[0]
+        
+        # Update webhook URL
+        updated_number = number.update(
+            sms_url=webhook_url,
+            sms_method='POST'
+        )
+        
+        logger.info(f"Webhook configured for {phone_number}: {webhook_url}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error configuring webhook for {phone_number}: {e}")
+        raise Exception(f"Failed to configure webhook: {str(e)}")
+
+def get_signalwire_phone_numbers():
+    """Get all phone numbers in the SignalWire account"""
+    try:
+        client = get_signalwire_client()
+        numbers = client.incoming_phone_numbers.list()
+        
+        return [
+            {
+                'phone_number': num.phone_number,
+                'friendly_name': num.friendly_name,
+                'sid': num.sid,
+                'sms_url': getattr(num, 'sms_url', None),
+                'status': 'active',
+                'capabilities': {
+                    'sms': True,
+                    'mms': True,
+                    'voice': True
+                }
+            }
+            for num in numbers
+        ]
+        
+    except Exception as e:
+        logger.error(f"Error getting SignalWire phone numbers: {e}")
+        return []
+    
 # Additional helper functions that might be expected
 def get_twilio_client():
     """Legacy function that redirects to SignalWire"""
