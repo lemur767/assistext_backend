@@ -19,9 +19,9 @@ class Config:
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=90)
     
     # SignalWire configuration
-    SIGNALWIRE_PROJECT_ID = os.environ.get('SIGNALWIRE_PROJECT_ID')
-    SIGNALWIRE_API_TOKEN = os.environ.get('SIGNALWIRE_API_TOKEN') 
-    SIGNALWIRE_SPACE_URL = os.environ.get('SIGNALWIRE_SPACE_URL')
+    SIGNALWIRE_PROJECT_ID = os.environ.get('SIGNALWIRE_PROJECT_ID','de26db73-cf95-4570-9d3a-bb44c08eb70e')
+    SIGNALWIRE_API_TOKEN = os.environ.get('SIGNALWIRE_API_TOKEN','PTd97f3d390058b8d5cd9b1e00a176ef79e0f314b3548f5e42') 
+    SIGNALWIRE_SPACE_URL = os.environ.get('SIGNALWIRE_SPACE_URL','https://assistext.signalwire.com')
     VERIFY_SIGNALWIRE_SIGNATURE = os.environ.get('VERIFY_SIGNALWIRE_SIGNATURE', 'True').lower() == 'true'
     
     # LLM Server configuration
