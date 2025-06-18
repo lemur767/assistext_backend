@@ -4,7 +4,6 @@ from app.models.profile import Profile
 from app.models.user import User
 from app.utils.signalwire_helpers import (
     get_signalwire_phone_numbers,
-    setup_signalwire_webhook_for_number,
     is_signalwire_number_available,
     format_phone_number
 )
