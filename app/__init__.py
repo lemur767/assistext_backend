@@ -25,7 +25,7 @@ def create_app(config_name=None):
     
     # Initialize CORS
     CORS(app, origins=app.config.get('CORS_ORIGINS'))
-    
+	    
     # Initialize SocketIO
     socketio.init_app(app, cors_allowed_origins=app.config.get('CORS_ORIGINS'))
     
@@ -38,6 +38,8 @@ def create_app(config_name=None):
     # Register error handlers
     register_error_handlers(app)
     
+    register_cli_commands(app)
+
     # Health check endpoint
     @app.route('/health')
     @app.route('/api/health')
@@ -51,6 +53,14 @@ def create_app(config_name=None):
     
     return app
 
+def register_cli_commands(app):
+    """Register custom CLI commands"""
+    from app.cli import init_signalwire, verify_signalwire, signalwire_status, test_signalwire
+    
+    app.cli.add_command(init_signalwire)
+    app.cli.add_command(verify_signalwire) 
+    app.cli.add_command(signalwire_status)
+    app.cli.add_command(test_signalwire)
 
 def register_blueprints(app):
     """Register all Flask blueprints"""

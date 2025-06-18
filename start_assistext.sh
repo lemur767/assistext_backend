@@ -43,22 +43,22 @@ else
 fi
 
 # Start Celery
-echo "Starting Celery worker..."
-nohup celery -A wsgi.celery worker --loglevel=info --concurrency=2 --pool=solo > logs/celery.log 2>&1 &
-CELERY_PID=$!
-echo "Celery started with PID: $CELERY_PID"
+#echo "Starting Celery worker..."
+#nohup celery -A wsgi.celery worker --loglevel=info --concurrency=2 --pool=solo > logs/celery.log 2>&1 &
+#CELERY_PID=$!
+#echo "Celery started with PID: $CELERY_PID"
 
 # Save PIDs
-echo $BACKEND_PID > pids/backend.pid
-echo $CELERY_PID > pids/celery.pid
+#echo $BACKEND_PID > pids/backend.pid
+#echo $CELERY_PID > pids/celery.pid
 
 # Wait and check if Celery is still running
-sleep 5
-if ps -p $CELERY_PID > /dev/null; then
-    echo "✅ Celery is running successfully"
-else
-    echo "❌ Celery failed to start, check logs/celery.log"
-fi
+#sleep 5
+#if ps -p $CELERY_PID > /dev/null; then
+ #   echo "✅ Celery is running successfully"
+#else
+ #   echo "❌ Celery failed to start, check logs/celery.log"
+#fi
 
 echo ""
 echo "🎉 AssisText started!"
