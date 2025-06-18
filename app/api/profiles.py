@@ -8,7 +8,7 @@ from app.utils.signalwire_helpers import (
     format_phone_number
 )
 from app.services.signalwire_service import configure_profile_signalwire_webhook
-from app import db
+from app.extensions import db
 from datetime import datetime
 import json
 import logging

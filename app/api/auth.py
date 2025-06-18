@@ -4,7 +4,7 @@ from flask_jwt_extended import (
     get_jwt_identity
 )
 from app.models.user import User
-from app import db
+from app.extensions import db
 from datetime import datetime
 import logging
 

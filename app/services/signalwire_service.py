@@ -1,11 +1,14 @@
+# app/services/signalwire_service.py - SignalWire service integration
+
 from app.utils.signalwire_helpers import (
     setup_all_signalwire_webhooks, 
     get_signalwire_phone_numbers, 
     get_signalwire_integration_status,
-    setup_signalwire_webhook_for_number
+    setup_signalwire_webhook_for_number,
+    configure_profile_signalwire_webhook
 )
 from app.models.profile import Profile
-from app import db
+from app.extensions import db
 from datetime import datetime
 import logging
 
@@ -55,33 +58,23 @@ def sync_signalwire_numbers_with_profiles(available_numbers):
             phone_number = number_info['phone_number']
             number_sid = number_info['sid']
             
-            # Find existing profile
-            profile = Profile.query.filter_by(phone_number=phone_number).first()
+            # Check if profile exists for this number
+            existing_profile = Profile.query.filter_by(phone_number=phone_number).first()
             
-            if profile:
-                # Update existing profile
-                profile.signalwire_number_sid = number_sid
-                profile.signalwire_webhook_configured = True
-                profile.signalwire_last_sync = datetime.utcnow()
-                synced_count += 1
-                logger.info(f"Synced existing profile '{profile.name}' with SignalWire number {phone_number}")
+            if existing_profile:
+                # Update existing profile with SignalWire info
+                if not existing_profile.signalwire_sid:
+                    existing_profile.signalwire_sid = number_sid
+                    existing_profile.webhook_status = 'active'
+                    synced_count += 1
             else:
-                # Create new profile for unassigned SignalWire number
-                new_profile = Profile(
-                    user_id=1,  # You might want to assign to a default admin user
-                    name=f"SignalWire {phone_number}",
-                    phone_number=phone_number,
-                    description=f"Auto-created profile for SignalWire number {phone_number}",
-                    signalwire_number_sid=number_sid,
-                    signalwire_webhook_configured=True,
-                    signalwire_last_sync=datetime.utcnow(),
-                    ai_enabled=True  # Enable AI by default for new profiles
-                )
-                db.session.add(new_profile)
-                created_count += 1
-                logger.info(f"Created new profile for SignalWire number {phone_number}")
+                # Could create a profile here if needed, but probably not for existing numbers
+                # Just log that the number exists but has no profile
+                logger.info(f"SignalWire number {phone_number} has no associated profile")
         
-        db.session.commit()
+        if synced_count > 0:
+            db.session.commit()
+            logger.info(f"Synced {synced_count} profiles with SignalWire data")
         
         return {
             'synced': synced_count,
@@ -90,117 +83,98 @@ def sync_signalwire_numbers_with_profiles(available_numbers):
         
     except Exception as e:
         logger.error(f"Error syncing SignalWire numbers with profiles: {str(e)}")
-        db.session.rollback()
         return {
             'synced': 0,
-            'created': 0,
-            'error': str(e)
+            'created': 0
         }
 
-def configure_profile_signalwire_webhook(profile_id):
-    """Configure SignalWire webhook for specific profile"""
-    try:
-        profile = Profile.query.get(profile_id)
-        if not profile:
-            return {'success': False, 'error': 'Profile not found'}
-        
-        success, number_sid = setup_signalwire_webhook_for_number(profile.phone_number)
-        
-        if success:
-            profile.signalwire_number_sid = number_sid
-            profile.signalwire_webhook_configured = True
-            profile.signalwire_last_sync = datetime.utcnow()
-            db.session.commit()
-            
-            logger.info(f"SignalWire webhook configured for profile {profile.name}")
-            return {'success': True, 'number_sid': number_sid}
-        else:
-            return {'success': False, 'error': 'Failed to configure webhook'}
-            
-    except Exception as e:
-        logger.error(f"Error configuring SignalWire webhook for profile {profile_id}: {str(e)}")
-        return {'success': False, 'error': str(e)}
-
 def verify_signalwire_integration():
-    """Verify SignalWire integration is working properly"""
+    """Verify SignalWire integration status"""
     try:
+        # Check SignalWire connection
         status = get_signalwire_integration_status()
         
-        if status['status'] == 'connected':
-            logger.info("SignalWire integration verified successfully")
-            
-            # Check if all profiles have proper SignalWire configuration
-            profiles = Profile.query.all()
-            misconfigured_profiles = []
-            
-            for profile in profiles:
-                if not profile.is_signalwire_configured():
-                    misconfigured_profiles.append(profile.name)
-            
-            if misconfigured_profiles:
-                logger.warning(f"Profiles not properly configured with SignalWire: {misconfigured_profiles}")
-            
-            return {
-                'success': True,
-                'status': status,
-                'misconfigured_profiles': misconfigured_profiles
-            }
-        else:
-            logger.error(f"SignalWire integration verification failed: {status.get('error', 'Unknown error')}")
+        if status['status'] != 'connected':
             return {
                 'success': False,
-                'error': status.get('error', 'Unknown error')
+                'error': f"SignalWire not connected: {status.get('error', 'Unknown error')}"
             }
-            
+        
+        # Get phone numbers and check webhook configuration
+        phone_numbers = get_signalwire_phone_numbers()
+        
+        # Check for profiles that need webhook configuration
+        misconfigured_profiles = []
+        profiles_with_numbers = Profile.query.filter(Profile.phone_number.isnot(None)).all()
+        
+        for profile in profiles_with_numbers:
+            if not profile.webhook_url or profile.webhook_status != 'active':
+                misconfigured_profiles.append(profile.name)
+        
+        return {
+            'success': True,
+            'status': status,
+            'phone_numbers': phone_numbers,
+            'misconfigured_profiles': misconfigured_profiles
+        }
+        
     except Exception as e:
-        logger.error(f"SignalWire verification error: {str(e)}")
+        logger.error(f"SignalWire verification failed: {str(e)}")
         return {
             'success': False,
             'error': str(e)
         }
 
 def get_signalwire_dashboard_data():
-    """Get data for SignalWire integration dashboard"""
+    """Get data for SignalWire dashboard display"""
     try:
-        # Get integration status
-        status = get_signalwire_integration_status()
+        # Get SignalWire status
+        signalwire_status = get_signalwire_integration_status()
         
-        # Get profile statistics
-        total_profiles = Profile.query.count()
-        configured_profiles = Profile.query.filter_by(signalwire_webhook_configured=True).count()
-        active_profiles = Profile.query.filter_by(is_active=True, ai_enabled=True).count()
+        # Get phone numbers
+        phone_numbers = get_signalwire_phone_numbers()
         
-        # Get recent message statistics
+        # Get profiles with SignalWire integration
+        profiles = Profile.query.filter(Profile.phone_number.isnot(None)).all()
+        
+        # Calculate statistics
+        total_profiles = len(profiles)
+        configured_profiles = len([p for p in profiles if p.webhook_status == 'active'])
+        
+        # Get recent messages (last 24 hours)
         from app.models.message import Message
         from datetime import datetime, timedelta
         
-        last_24h = datetime.utcnow() - timedelta(hours=24)
-        recent_messages = Message.query.filter(Message.timestamp >= last_24h).count()
-        recent_incoming = Message.query.filter(
-            Message.timestamp >= last_24h,
-            Message.is_incoming == True
-        ).count()
-        recent_outgoing = Message.query.filter(
-            Message.timestamp >= last_24h,
-            Message.is_incoming == False
-        ).count()
+        yesterday = datetime.utcnow() - timedelta(days=1)
+        recent_messages = Message.query.filter(Message.timestamp >= yesterday).count()
         
         return {
-            'signalwire_status': status,
-            'profile_stats': {
-                'total': total_profiles,
-                'configured': configured_profiles,
-                'active': active_profiles
+            'signalwire_status': signalwire_status,
+            'phone_numbers': phone_numbers,
+            'stats': {
+                'total_phone_numbers': len(phone_numbers),
+                'total_profiles': total_profiles,
+                'configured_profiles': configured_profiles,
+                'recent_messages_24h': recent_messages
             },
-            'message_stats_24h': {
-                'total': recent_messages,
-                'incoming': recent_incoming,
-                'outgoing': recent_outgoing
-            }
+            'profiles': [p.to_dict() for p in profiles[:10]]  # Latest 10 profiles
         }
         
     except Exception as e:
         logger.error(f"Error getting SignalWire dashboard data: {str(e)}")
         return {
-            'error': str(e)
+            'error': str(e),
+            'signalwire_status': {'status': 'error', 'error': str(e)},
+            'phone_numbers': [],
+            'stats': {},
+            'profiles': []
         }
+
+# Re-export functions for convenience
+__all__ = [
+    'initialize_signalwire_integration',
+    'sync_signalwire_numbers_with_profiles', 
+    'verify_signalwire_integration',
+    'get_signalwire_dashboard_data',
+    'configure_profile_signalwire_webhook'
+]

@@ -1,4 +1,4 @@
-# app/utils/signalwire_helpers.py - Enhanced SignalWire integration
+# app/utils/signalwire_helpers.py - Complete version with all missing functions
 
 import logging
 from typing import Dict, List, Optional, Union
@@ -315,7 +315,93 @@ def get_number_details(phone_number: str) -> Optional[Dict]:
         return None
 
 
-# Legacy function aliases for backward compatibility
+# ============ MISSING FUNCTIONS THAT ARE BEING IMPORTED ============
+
+def get_phone_number_info(phone_number: str) -> Optional[Dict]:
+    """Get phone number information - alias for get_number_details"""
+    return get_number_details(phone_number)
+
+
+def is_signalwire_number_available(phone_number: str) -> bool:
+    """Check if a phone number is available for purchase"""
+    try:
+        details = get_number_details(phone_number)
+        return details is not None and details.get('status') == 'available'
+    except Exception as e:
+        logger.error(f"Error checking number availability: {str(e)}")
+        return False
+
+
+def check_phone_number_availability(phone_number: str) -> Dict:
+    """Check phone number availability with detailed response"""
+    try:
+        details = get_number_details(phone_number)
+        
+        if details is None:
+            return {
+                'available': False,
+                'status': 'not_found',
+                'message': 'Phone number not found'
+            }
+        
+        if details.get('status') == 'available':
+            return {
+                'available': True,
+                'status': 'available',
+                'details': details,
+                'message': 'Phone number is available for purchase'
+            }
+        elif details.get('status') == 'owned':
+            return {
+                'available': False,
+                'status': 'owned',
+                'details': details,
+                'message': 'Phone number is already in your account'
+            }
+        else:
+            return {
+                'available': False,
+                'status': 'unavailable',
+                'message': 'Phone number is not available'
+            }
+            
+    except Exception as e:
+        logger.error(f"Error checking phone number availability: {str(e)}")
+        return {
+            'available': False,
+            'status': 'error',
+            'message': f'Error checking availability: {str(e)}'
+        }
+
+
+def get_phone_number_capabilities(phone_number: str) -> Dict:
+    """Get capabilities for a phone number"""
+    try:
+        details = get_number_details(phone_number)
+        if details:
+            return details.get('capabilities', {})
+        return {}
+    except Exception as e:
+        logger.error(f"Error getting phone number capabilities: {str(e)}")
+        return {}
+
+
+def list_available_phone_numbers(area_code: str = None, country: str = 'CA', limit: int = 20) -> List[Dict]:
+    """List available phone numbers - alias for get_available_phone_numbers"""
+    return get_available_phone_numbers(area_code, country, limit)
+
+
+def search_phone_numbers(**kwargs) -> List[Dict]:
+    """Search for phone numbers with various criteria"""
+    area_code = kwargs.get('area_code')
+    country = kwargs.get('country', 'CA')
+    limit = kwargs.get('limit', 20)
+    
+    return get_available_phone_numbers(area_code, country, limit)
+
+
+# ============ LEGACY FUNCTION ALIASES ============
+
 def send_sms(from_number: str, to_number: str, body: str) -> Optional[Dict]:
     """Legacy alias for send_signalwire_sms"""
     return send_signalwire_sms(from_number, to_number, body)
@@ -329,3 +415,159 @@ def validate_signalwire_request(request) -> bool:
 def configure_webhook(phone_number: str, webhook_url: str) -> bool:
     """Legacy alias for configure_number_webhook"""
     return configure_number_webhook(phone_number, webhook_url)
+
+
+def get_account_phone_numbers() -> List[Dict]:
+    """Legacy alias for get_signalwire_phone_numbers"""
+    return get_signalwire_phone_numbers()
+
+
+def test_signalwire_connection() -> Dict:
+    """Test SignalWire connection"""
+    return get_signalwire_integration_status()
+
+
+# ============ SERVICE INTEGRATION FUNCTIONS ============
+
+def setup_all_signalwire_webhooks() -> List[Dict]:
+    """Set up SignalWire webhooks for all phone numbers in the project"""
+    try:
+        webhook_url = f"{current_app.config['BASE_URL']}/api/webhooks/sms"
+        client = get_signalwire_client()
+        
+        numbers = client.incoming_phone_numbers.list()
+        results = []
+        
+        for number in numbers:
+            try:
+                updated_number = number.update(
+                    sms_url=webhook_url, 
+                    sms_method='POST'
+                )
+                results.append({
+                    'phone_number': number.phone_number,
+                    'sid': updated_number.sid,
+                    'success': True,
+                    'webhook_url': webhook_url
+                })
+                logger.info(f"SignalWire webhook configured for {number.phone_number}")
+            except Exception as e:
+                results.append({
+                    'phone_number': number.phone_number,
+                    'sid': number.sid,
+                    'success': False,
+                    'error': str(e)
+                })
+                logger.error(f"Failed to configure SignalWire webhook for {number.phone_number}: {str(e)}")
+        
+        success_count = len([r for r in results if r['success']])
+        logger.info(f"SignalWire webhooks configured: {success_count}/{len(numbers)} numbers")
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error setting up SignalWire webhooks: {str(e)}")
+        return []
+
+
+def setup_signalwire_webhook_for_number(phone_number: str, webhook_url: str = None) -> Dict:
+    """Set up SignalWire webhook for a specific phone number"""
+    try:
+        client = get_signalwire_client()
+        
+        if not webhook_url:
+            webhook_url = f"{current_app.config['BASE_URL']}/api/webhooks/sms"
+        
+        # Find the phone number in your SignalWire project
+        numbers = client.incoming_phone_numbers.list()
+        target_number = None
+        
+        for number in numbers:
+            if number.phone_number == normalize_phone_number(phone_number):
+                target_number = number
+                break
+        
+        if not target_number:
+            logger.error(f"Phone number {phone_number} not found in SignalWire project")
+            return {'success': False, 'error': 'Phone number not found'}
+        
+        # Update the webhook URL
+        updated_number = target_number.update(
+            sms_url=webhook_url, 
+            sms_method='POST'
+        )
+        
+        logger.info(f"SignalWire webhook configured for {phone_number}: {webhook_url}")
+        return {
+            'success': True,
+            'phone_number': phone_number,
+            'sid': updated_number.sid,
+            'webhook_url': webhook_url
+        }
+        
+    except Exception as e:
+        logger.error(f"Error setting up SignalWire webhook for {phone_number}: {str(e)}")
+        return {'success': False, 'error': str(e)}
+
+
+def configure_profile_signalwire_webhook(profile_id: int, phone_number: str) -> Dict:
+    """Configure SignalWire webhook for a specific profile"""
+    try:
+        webhook_url = f"{current_app.config['BASE_URL']}/api/webhooks/sms"
+        result = setup_signalwire_webhook_for_number(phone_number, webhook_url)
+        
+        if result['success']:
+            # Update profile with webhook info
+            from app.models.profile import Profile
+            from app.extensions import db
+            
+            profile = Profile.query.get(profile_id)
+            if profile:
+                profile.webhook_url = webhook_url
+                profile.webhook_status = 'active'
+                profile.signalwire_sid = result.get('sid')
+                db.session.commit()
+                
+                logger.info(f"Profile {profile_id} webhook configured for {phone_number}")
+            
+            return {
+                'success': True,
+                'profile_id': profile_id,
+                'phone_number': phone_number,
+                'webhook_url': webhook_url
+            }
+        else:
+            return result
+            
+    except Exception as e:
+        logger.error(f"Error configuring profile webhook: {str(e)}")
+        return {'success': False, 'error': str(e)}
+
+
+# ============ UTILITY FUNCTIONS ============
+
+def normalize_phone_number(phone_number: str) -> str:
+    """Normalize phone number to E.164 format"""
+    # Remove all non-digit characters
+    digits = ''.join(filter(str.isdigit, phone_number))
+    
+    # Add country code if missing
+    if len(digits) == 10:
+        # Assume North American number
+        return f"+1{digits}"
+    elif len(digits) == 11 and digits.startswith('1'):
+        # Already has country code
+        return f"+{digits}"
+    else:
+        # International number
+        return f"+{digits}"
+
+
+def is_valid_phone_number(phone_number: str) -> bool:
+    """Validate phone number format"""
+    try:
+        normalized = normalize_phone_number(phone_number)
+        # Basic validation: should start with + and have 10-15 digits
+        return len(normalized) >= 11 and len(normalized) <= 16 and normalized.startswith('+')
+    except:
+        return False
