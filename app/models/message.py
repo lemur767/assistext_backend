@@ -1,25 +1,36 @@
-from app import db
+# app/models/message.py - Updated Message model with SignalWire integration
+
+from app.extensions import db
 from datetime import datetime
 
 class Message(db.Model):
     __tablename__ = 'messages'
     
     id = db.Column(db.Integer, primary_key=True)
-    profile_id = db.Column(db.Integer, db.ForeignKey('profiles.id'), nullable=False)
     content = db.Column(db.Text, nullable=False)
     is_incoming = db.Column(db.Boolean, nullable=False)
     sender_number = db.Column(db.String(20), nullable=False)
-    
-    # SignalWire specific fields
-    signalwire_message_sid = db.Column(db.String(50))  # SignalWire message SID
-    signalwire_account_sid = db.Column(db.String(50))  # SignalWire account SID
-    signalwire_status = db.Column(db.String(20), default='pending')  # SignalWire delivery status
-    signalwire_error_code = db.Column(db.String(10))   # SignalWire error code if any
-    signalwire_error_message = db.Column(db.Text)      # SignalWire error message
-    
+    profile_id = db.Column(db.Integer, db.ForeignKey('profiles.id'), nullable=False)
     ai_generated = db.Column(db.Boolean, default=False)
     is_read = db.Column(db.Boolean, default=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # SignalWire integration fields
+    signalwire_sid = db.Column(db.String(50))  # SignalWire message SID
+    send_status = db.Column(db.String(20))     # queued, sending, sent, failed, delivered
+    error_code = db.Column(db.String(10))      # SignalWire error code if failed
+    error_message = db.Column(db.String(255))  # Error description
+    
+    # Legacy Twilio field (for migration compatibility)
+    twilio_sid = db.Column(db.String(50))
+    
+    # AI response metadata
+    ai_model_used = db.Column(db.String(50))   # Which AI model generated the response
+    ai_response_time = db.Column(db.Float)     # Time taken to generate AI response
+    ai_confidence = db.Column(db.Float)        # AI confidence score (if available)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
     profile = db.relationship('Profile', back_populates='messages')
@@ -27,36 +38,18 @@ class Message(db.Model):
     def to_dict(self):
         return {
             'id': self.id,
-            'profile_id': self.profile_id,
             'content': self.content,
             'is_incoming': self.is_incoming,
             'sender_number': self.sender_number,
-            'signalwire_message_sid': self.signalwire_message_sid,
-            'signalwire_account_sid': self.signalwire_account_sid,
-            'signalwire_status': self.signalwire_status,
-            'signalwire_error_code': self.signalwire_error_code,
+            'profile_id': self.profile_id,
             'ai_generated': self.ai_generated,
             'is_read': self.is_read,
-            'timestamp': self.timestamp.isoformat()
+            'timestamp': self.timestamp.isoformat(),
+            'signalwire_sid': self.signalwire_sid,
+            'send_status': self.send_status,
+            'error_code': self.error_code,
+            'ai_model_used': self.ai_model_used,
+            'ai_response_time': self.ai_response_time,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat()
         }
-    
-    @property
-    def delivery_status(self):
-        """Human-readable delivery status"""
-        status_map = {
-            'pending': 'Pending',
-            'queued': 'Queued',
-            'sending': 'Sending',
-            'sent': 'Sent',
-            'receiving': 'Receiving',
-            'received': 'Received',
-            'delivered': 'Delivered',
-            'undelivered': 'Undelivered',
-            'failed': 'Failed'
-        }
-        return status_map.get(self.signalwire_status, 'Unknown')
-    
-    @property
-    def has_error(self):
-        """Check if message has SignalWire error"""
-        return bool(self.signalwire_error_code or self.signalwire_error_message)

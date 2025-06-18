@@ -1,7 +1,7 @@
-# app/models/client.py - Enhanced client model
+# app/models/client.py - Updated Client model
+
 from app.extensions import db
 from datetime import datetime
-
 
 class Client(db.Model):
     __tablename__ = 'clients'
@@ -12,7 +12,7 @@ class Client(db.Model):
     email = db.Column(db.String(255))
     notes = db.Column(db.Text)
     
-    # Client categorization
+    # Client status and categorization
     is_regular = db.Column(db.Boolean, default=False)
     is_blocked = db.Column(db.Boolean, default=False)
     is_flagged = db.Column(db.Boolean, default=False)
@@ -24,22 +24,19 @@ class Client(db.Model):
     last_contact = db.Column(db.DateTime, default=datetime.utcnow)
     last_ai_response = db.Column(db.DateTime)
     
-    # Geographic and device info (if available)
+    # Geographic and device info
     city = db.Column(db.String(100))
     state = db.Column(db.String(50))
-    country = db.Column(db.String(50))
+    country = db.Column(db.String(50), default='CA')
     timezone = db.Column(db.String(50))
-    device_type = db.Column(db.String(50))  # android, iphone, etc.
+    device_type = db.Column(db.String(50))
     
-    # Preference tracking
-    preferred_communication_time = db.Column(db.String(50))  # morning, afternoon, evening
-    response_preference = db.Column(db.String(20))  # quick, detailed
+    # Communication preferences
+    preferred_communication_time = db.Column(db.String(50))
+    response_preference = db.Column(db.String(20), default='quick')
     
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    profile_clients = db.relationship('ProfileClient', back_populates='client')
     
     def to_dict(self):
         return {
