@@ -13,6 +13,7 @@ from app.utils.ollama_helpers import generate_ai_response
 from datetime import datetime
 import logging
 import json
+from app.services.ai_response_service import AIResponseService
 
 logger = logging.getLogger(__name__)
 webhooks_bp = Blueprint('webhooks', __name__)
@@ -205,6 +206,64 @@ Context about this conversation:
         logger.error(f"Error generating AI response: {str(e)}")
         return ""
 
+
+@webhooks_bp.route('/signalwire/sms/<subaccount_sid>', methods=['POST'])
+def handle_subaccount_sms(subaccount_sid):
+    """Handle SMS webhook for specific sub-account"""
+    try:
+        # Validate webhook (implement SignalWire signature validation)
+        if not validate_signalwire_webhook(request):
+            return jsonify({'error': 'Invalid webhook signature'}), 403
+        
+        # Parse webhook data
+        data = request.form
+        from_number = data.get('From')
+        to_number = data.get('To')
+        body = data.get('Body')
+        message_sid = data.get('MessageSid')
+        
+        # Get sub-account details
+        subaccount = db.session.execute(
+            """
+            SELECT sa.*, spn.phone_number 
+            FROM signalwire_subaccounts sa
+            JOIN subaccount_phone_numbers spn ON sa.id = spn.subaccount_id
+            WHERE sa.subaccount_sid = %(sid)s AND spn.phone_number = %(to)s
+            """,
+            {'sid': subaccount_sid, 'to': to_number}
+        ).fetchone()
+        
+        if not subaccount:
+            return jsonify({'error': 'Sub-account not found'}), 404
+        
+        # Store incoming message
+        message = Message(
+            user_id=subaccount.user_id,
+            phone_number=to_number,
+            contact_number=from_number,
+            content=body,
+            direction='inbound',
+            message_sid=message_sid,
+            is_processed=False
+        )
+        db.session.add(message)
+        db.session.commit()
+        
+        # Trigger AI response (async)
+        ai_service = AIResponseService()
+        ai_service.process_incoming_message_async(message.id, subaccount_sid)
+        
+        return jsonify({'status': 'received'}), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Webhook error: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+def validate_signalwire_webhook(request):
+    """Validate SignalWire webhook signature"""
+    # Implement SignalWire webhook validation
+    # See: https://developer.signalwire.com/guides/securing-your-webhooks
+    return True  # Simplified for example
 
 def build_ai_context(profile: Profile, sender_number: str) -> str:
     """Build context information for AI response generation"""
