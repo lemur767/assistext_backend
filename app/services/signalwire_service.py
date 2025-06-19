@@ -4,7 +4,6 @@ from app.utils.signalwire_helpers import (
     setup_all_signalwire_webhooks, 
     get_signalwire_phone_numbers, 
     get_signalwire_integration_status,
-    setup_signalwire_webhook_for_number,
     configure_profile_signalwire_webhook
 )
 from app.models.profile import Profile

@@ -13,7 +13,6 @@ from app.utils.ollama_helpers import generate_ai_response
 from datetime import datetime
 import logging
 import json
-from app.services.ai_response_service import AIResponseService
 
 logger = logging.getLogger(__name__)
 webhooks_bp = Blueprint('webhooks', __name__)
@@ -250,7 +249,7 @@ def handle_subaccount_sms(subaccount_sid):
         db.session.commit()
         
         # Trigger AI response (async)
-        ai_service = AIResponseService()
+        ai_service = generate_ai_response()
         ai_service.process_incoming_message_async(message.id, subaccount_sid)
         
         return jsonify({'status': 'received'}), 200

@@ -65,3 +65,4 @@ structlog==23.2.0
 
 # SignalWire Integration
 signalwire
+asyncio
