@@ -112,6 +112,14 @@ def search_available_numbers():
             'details': str(e)
         }), 500
 
+@signup_bp.route('/test', methods=['GET', 'POST'])
+def test_endpoint():
+    """Test endpoint to verify signup blueprint is working"""
+    return jsonify({
+        'status': 'success',
+        'message': 'Signup blueprint is working',
+        'method': request.method
+    }), 200
 
 @signup_bp.route('/validate-username', methods=['POST'])
 def validate_username():
