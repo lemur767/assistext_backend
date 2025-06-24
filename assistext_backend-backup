@@ -1,0 +1,75 @@
+#server {
+ #   listen 80;
+  #  server_name backend.assistext.ca;
+    
+    # Redirect to HTTPS
+   # return 301 https://$server_name$request_uri;
+#}
+
+server {
+    listen 80;
+    server_name backend.assistext.ca;
+    
+    # SSL will be configured by certbot
+    # ssl_certificate /etc/letsencrypt/live/backend.assistext.ca/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/backend.assistext.ca/privkey.pem;
+    
+    # Security headers
+    add_header X-Content-Type-Options nosniff;
+    add_header X-Frame-Options DENY;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    
+    # CORS headers (if needed)
+    add_header Access-Control-Allow-Origin "https://assistext.ca" always;
+    add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" always;
+    add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
+    add_header Access-Control-Allow-Credentials "true" always;
+    
+    # Proxy to Gunicorn
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+        proxy_buffering off;
+        
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+    
+    # SignalWire webhooks endpoint
+    location /webhooks/signalwire {
+        # Whitelist SignalWire IPs
+        allow 147.75.60.0/24;
+        allow 54.172.60.0/24;
+        deny all;
+        
+        proxy_pass http://127.0.0.1:8000/webhooks/signalwire;
+        proxy_http_version 1.1;
+        proxy_set_header X-SignalWire-Signature $http_x_signalwire_signature;
+        proxy_set_header Content-Type $http_content_type;
+        proxy_buffering off;
+    }
+    
+    # WebSocket support (if needed)
+    location /socket.io {
+        proxy_pass http://127.0.0.1:8000/socket.io;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+    
+    # Health check endpoint
+    location /health {
+        access_log off;
+        proxy_pass http://127.0.0.1:8000/health;
+    }
+}

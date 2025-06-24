@@ -4,7 +4,7 @@ set -e
 echo "🚀 Starting AssisText services..."
 
 # Navigate to app directory
-cd /home/admin/assistext_backend
+cd /opt/assistext_backend
 
 # Activate virtual environment
 source venv/bin/activate
@@ -27,7 +27,7 @@ sleep 2
 
 # Start backend
 echo "Starting backend..."
-nohup gunicorn --bind 127.0.0.1:5000 --workers 2 --worker-class sync --timeout 120 wsgi:app > logs/backend.log 2>&1 &
+nohup gunicorn --bind 127.0.0.1:8000 --workers 2 --worker-class sync --timeout 120 wsgi:app > logs/backend.log 2>&1 &
 BACKEND_PID=$!
 echo "Backend started with PID: $BACKEND_PID"
 
@@ -35,7 +35,7 @@ echo "Backend started with PID: $BACKEND_PID"
 sleep 5
 
 # Test backend is running
-if curl -s http://localhost:5000/api/health > /dev/null; then
+if curl -s http://localhost:8000/api/health > /dev/null; then
     echo "✅ Backend is responding"
 else
     echo "❌ Backend failed to start"
