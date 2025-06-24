@@ -98,7 +98,7 @@ def configure_app_fallback(app):
         MAIL_DEFAULT_SENDER=os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@assistext.ca'),
         
         # Application
-        BASE_URL=os.environ.get('BASE_URL', 'http://localhost:8000')
+        BASE_URL=os.environ.get('BASE_URL', 'http://localhost:5000')
     )
 
 def setup_rate_limiting(app):
@@ -185,7 +185,13 @@ def register_routes(app, api, limiter):
         register_basic_signup_routes(app)
     except Exception as e:
         print(f"⚠️ Error registering signup blueprint: {e}")
-    
+    try:
+        from app.api.signalwire_test import signalwire_test_bp
+        app.register_blueprint(signalwire_test_bp, url_prefix='/api/signalwire')
+    except ImportError as e:
+        print(f"⚠️ Could not import test blueprint: {e}")
+    except Exception as e:
+        print(f"⚠️ Error Registering Test Blueprint: {e} ")    
     # Register profile routes
     try:
         from app.api.profiles import profiles_bp
@@ -214,12 +220,7 @@ def register_basic_auth_routes(api):
 
 def register_basic_signup_routes(app):
     """Fallback basic signup routes if main signup module fails"""
-    @app.route('/api/signup/search-numbers', methods=['POST'])
-    def basic_search_numbers():
-        return {
-            'error': 'Phone number search not available - check signup module',
-            'available_numbers': []
-        }, 501
+    
     
     @app.route('/api/signup/complete-signup', methods=['POST'])
     def basic_complete_signup():

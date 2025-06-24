@@ -17,6 +17,7 @@ import json
 logger = logging.getLogger(__name__)
 webhooks_bp = Blueprint('webhooks', __name__)
 
+
 @webhooks_bp.route('/sms', methods=['POST'])
 def sms_webhook():
     """Handle incoming SMS messages from SignalWire and generate AI responses"""

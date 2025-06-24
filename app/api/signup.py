@@ -1,16 +1,8 @@
-# app/api/signup.py - Updated signup API with SignalWire phone number selection
-
 from flask import Blueprint, request, jsonify, current_app
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from app.models.user import User
 from app.models.profile import Profile
 from app.extensions import db
-from app.utils.signalwire_helpers import (
-    get_signalwire_client, 
-    purchase_phone_number,
-    configure_number_webhook,
-    get_available_phone_numbers
-)
+from app.utils.signalwire_helpers import get_signalwire_client
 from datetime import datetime, timedelta
 import json
 import logging
@@ -18,7 +10,7 @@ import logging
 logger = logging.getLogger(__name__)
 signup_bp = Blueprint('signup', __name__)
 
-# Canadian area codes mapping
+# Canadian area codes mapping (same as before)
 CANADA_AREA_CODES = {
     'toronto': ['416', '647', '437'],
     'ottawa': ['613', '343'],
@@ -34,279 +26,116 @@ CANADA_AREA_CODES = {
 
 @signup_bp.route('/search-numbers', methods=['POST'])
 def search_available_numbers():
-    """Search for available phone numbers by area code"""
+    """
+    Registration flow: Search for exactly 5 available phone numbers 
+    Frontend → Backend → SignalWire API → Backend → Frontend (5 numbers)
+    """
     try:
         data = request.json
-        area_code = data.get('area_code')
         city = data.get('city', '').lower()
+        area_code = data.get('area_code')  # Optional specific area code
         
-        logger.info(f"Searching numbers for area_code={area_code}, city={city}")
+        logger.info(f"Registration phone search for city: {city}")
         
-        if not area_code and not city:
-            return jsonify({'error': 'Area code or city is required'}), 400
+        if not city:
+            return jsonify({
+                'error': 'City is required',
+                'available_numbers': []
+            }), 400
         
-        # If city provided, get area codes for that city
-        if city and not area_code:
-            area_codes = CANADA_AREA_CODES.get(city, [])
-            if not area_codes:
-                return jsonify({'error': f'No area codes found for city: {city}'}), 400
-        else:
-            area_codes = [area_code]
-        
-        # Search for available numbers across area codes
-        all_numbers = []
+        # Get SignalWire client
         client = get_signalwire_client()
+        if not client:
+            logger.error("SignalWire client not available for registration")
+            return jsonify({
+                'error': 'Phone number service temporarily unavailable. Please try again.',
+                'available_numbers': []
+            }), 503
         
-        for code in area_codes:
+        # Get area codes for the selected city
+        if area_code:
+            area_codes_to_search = [area_code]
+        else:
+            area_codes_to_search = CANADA_AREA_CODES.get(city, ['416'])  # Default to Toronto if city not found
+        
+        all_numbers = []
+        target_count = 5  # Exactly 5 numbers for registration
+        
+        # Search through area codes until we have 5 numbers
+        for code in area_codes_to_search:
+            if len(all_numbers) >= target_count:
+                break
+                
             try:
-                # Search Canadian numbers with this area code
-                numbers = client.available_phone_numbers('CA').list(
+                logger.info(f"Searching SignalWire for area code {code} in Canada")
+                
+                # Call SignalWire API for Canadian numbers
+                available_numbers = client.available_phone_numbers('CA').list(
                     area_code=code,
-                    sms_enabled=True,
-                    limit=10
+                    sms_enabled=True,  # Must support SMS
+                    limit=10  # Get more than needed to filter
                 )
                 
-                for num in numbers:
-                    all_numbers.append({
-                        'phone_number': num.phone_number,
-                        'formatted_number': format_phone_number(num.phone_number),
-                        'locality': getattr(num, 'locality', 'Unknown'),
-                        'region': getattr(num, 'region', 'ON'),
+                # Process each number from SignalWire
+                for number in available_numbers:
+                    if len(all_numbers) >= target_count:
+                        break
+                        
+                    # Format the number data for frontend
+                    formatted_number = {
+                        'phone_number': number.phone_number,
+                        'formatted_number': format_phone_number(number.phone_number),
+                        'locality': getattr(number, 'locality', city.title()),
+                        'region': getattr(number, 'region', _get_province_for_city(city)),
                         'area_code': code,
+                        'setup_cost': '$1.00',
+                        'monthly_cost': '$1.00',
                         'capabilities': {
-                            'sms': True,
-                            'voice': getattr(num, 'voice', True),
-                            'mms': getattr(num, 'mms', True)
-                        },
-                        'setup_cost': '$5.00',
-                        'monthly_cost': '$2.00'
-                    })
-                
-                # Stop when we have enough numbers
-                if len(all_numbers) >= 5:
-                    break
+                            'sms': getattr(number, 'sms_enabled', True),
+                            'voice': getattr(number, 'voice_enabled', True),
+                            'mms': getattr(number, 'mms_enabled', True)
+                        }
+                    }
                     
-            except Exception as e:
-                logger.warning(f"Error searching area code {code}: {str(e)}")
+                    all_numbers.append(formatted_number)
+                    
+            except Exception as area_error:
+                logger.warning(f"Failed searching area code {code}: {str(area_error)}")
                 continue
         
-        # Return up to 5 numbers
-        selected_numbers = all_numbers[:5]
-        
-        if not selected_numbers:
+        # Check if we got enough numbers
+        if len(all_numbers) == 0:
+            logger.warning(f"No SignalWire numbers found for {city}")
             return jsonify({
-                'error': 'No available numbers found for the requested area',
-                'available_numbers': []
-            }), 404
+                'error': f'No phone numbers currently available in {city.title()}. Please try a different city or contact support.',
+                'available_numbers': [],
+                'city': city.title()
+            }), 200
         
-        return jsonify({
-            'available_numbers': selected_numbers,
-            'total_found': len(selected_numbers),
-            'search_area_codes': area_codes
-        }), 200
+        # Return exactly what we found (up to 5)
+        final_numbers = all_numbers[:target_count]
         
-    except Exception as e:
-        logger.error(f"Error searching for phone numbers: {str(e)}")
-        return jsonify({
-            'error': 'Failed to search for available numbers',
-            'details': str(e)
-        }), 500
-
-@signup_bp.route('/test', methods=['GET', 'POST'])
-def test_endpoint():
-    """Test endpoint to verify signup blueprint is working"""
-    return jsonify({
-        'status': 'success',
-        'message': 'Signup blueprint is working',
-        'method': request.method
-    }), 200
-
-@signup_bp.route('/validate-username', methods=['POST'])
-def validate_username():
-    """Check if username is available"""
-    data = request.json
-    username = data.get('username', '').strip()
-    
-    if not username:
-        return jsonify({'error': 'Username is required'}), 400
-    
-    if len(username) < 3:
-        return jsonify({'error': 'Username must be at least 3 characters'}), 400
-    
-    # Check if username exists
-    existing_user = User.query.filter_by(username=username).first()
-    
-    if existing_user:
-        return jsonify({'available': False, 'error': 'Username already taken'}), 200
-    
-    return jsonify({'available': True}), 200
-
-
-@signup_bp.route('/validate-email', methods=['POST'])
-def validate_email():
-    """Check if email is available"""
-    data = request.json
-    email = data.get('email', '').strip()
-    
-    if not email:
-        return jsonify({'error': 'Email is required'}), 400
-    
-    # Check if email exists
-    existing_user = User.query.filter_by(email=email).first()
-    
-    if existing_user:
-        return jsonify({'available': False, 'error': 'Email already registered'}), 200
-    
-    return jsonify({'available': True}), 200
-
-
-@signup_bp.route('/complete-signup', methods=['POST'])
-def complete_signup():
-    """Complete the multi-step signup process with phone number purchase and webhook setup"""
-    data = request.json
-    
-    # Validate required fields
-    required_fields = [
-        'username', 'email', 'password', 'firstName', 'lastName',
-        'profileName', 'selectedPhoneNumber'
-    ]
-    
-    for field in required_fields:
-        if not data.get(field):
-            return jsonify({'error': f'{field} is required'}), 400
-    
-    # Validate password confirmation
-    if data.get('password') != data.get('confirmPassword'):
-        return jsonify({'error': 'Passwords do not match'}), 400
-    
-    try:
-        # Check if username or email already exists
-        existing_user = User.query.filter(
-            (User.username == data['username']) | 
-            (User.email == data['email'])
-        ).first()
-        
-        if existing_user:
-            if existing_user.username == data['username']:
-                return jsonify({'error': 'Username already taken'}), 400
-            else:
-                return jsonify({'error': 'Email already registered'}), 400
-        
-        # Check if phone number is already taken
-        phone_number = data['selectedPhoneNumber']
-        existing_profile = Profile.query.filter_by(phone_number=phone_number).first()
-        if existing_profile:
-            return jsonify({'error': 'Selected phone number is no longer available'}), 400
-        
-        # Create new user
-        user = User(
-            username=data['username'],
-            email=data['email'],
-            first_name=data['firstName'],
-            last_name=data['lastName'],
-            phone_number=data.get('personalPhone', ''),
-            is_active=True,
-            created_at=datetime.utcnow()
-        )
-        user.set_password(data['password'])
-        
-        db.session.add(user)
-        db.session.flush()  # Get user ID without committing
-        
-        logger.info(f"Created user {user.id}: {user.username}")
-        
-        # Purchase the phone number through SignalWire
-        try:
-            friendly_name = f"{data['profileName']} - {data['username']}"
-            purchase_result = purchase_phone_number(
-                phone_number=phone_number,
-                friendly_name=friendly_name
-            )
-            
-            if not purchase_result:
-                raise Exception("Failed to purchase phone number")
-            
-            logger.info(f"Successfully purchased {phone_number}")
-            
-        except Exception as phone_error:
-            logger.error(f"Phone number purchase failed: {str(phone_error)}")
-            db.session.rollback()
-            return jsonify({
-                'error': 'Failed to purchase phone number',
-                'details': str(phone_error)
-            }), 500
-        
-        # Configure webhook for SMS AI responses
-        try:
-            # Set webhook URL to point to your SMS handler
-            webhook_url = f"{current_app.config['BASE_URL']}/api/webhooks/sms"
-            
-            webhook_success = configure_number_webhook(phone_number, webhook_url)
-            if not webhook_success:
-                logger.warning(f"Webhook configuration failed for {phone_number}")
-                # Don't fail registration for webhook issues - can be fixed later
-            else:
-                logger.info(f"Webhook configured for {phone_number}: {webhook_url}")
-                
-        except Exception as webhook_error:
-            logger.warning(f"Webhook setup failed: {str(webhook_error)}")
-            # Continue with registration - webhook can be configured later
-        
-        # Create profile with phone number
-        profile = Profile(
-            user_id=user.id,
-            name=data['profileName'],
-            phone_number=phone_number,
-            description=data.get('profileDescription', ''),
-            timezone=data.get('timezone', 'America/Toronto'),
-            is_active=True,
-            ai_enabled=True,  # Enable AI by default
-            daily_auto_response_limit=100,  # Default limit
-            signalwire_sid=purchase_result.get('sid'),
-            created_at=datetime.utcnow()
-        )
-        
-        db.session.add(profile)
-        db.session.commit()
-        
-        logger.info(f"Created profile {profile.id} for user {user.id} with phone {phone_number}")
-        
-        # Create access token
-        access_token = create_access_token(
-            identity=user.id,
-            expires_delta=timedelta(days=30)
-        )
+        logger.info(f"Registration: Found {len(final_numbers)} SignalWire numbers for {city}")
         
         return jsonify({
             'success': True,
-            'message': 'Registration completed successfully',
-            'access_token': access_token,
-            'user': {
-                'id': user.id,
-                'username': user.username,
-                'email': user.email,
-                'firstName': user.first_name,
-                'lastName': user.last_name
-            },
-            'profile': {
-                'id': profile.id,
-                'name': profile.name,
-                'phone_number': profile.phone_number,
-                'ai_enabled': profile.ai_enabled
-            }
-        }), 201
+            'available_numbers': final_numbers,
+            'city': city.title(),
+            'count': len(final_numbers),
+            'message': f'Found {len(final_numbers)} available numbers in {city.title()}'
+        }), 200
         
     except Exception as e:
-        db.session.rollback()
-        logger.error(f"Registration failed: {str(e)}")
+        logger.error(f"Registration phone search error: {str(e)}")
         return jsonify({
-            'error': 'Registration failed',
-            'details': str(e)
+            'error': 'Unable to search for phone numbers. Please try again.',
+            'available_numbers': [],
+            'details': str(e) if current_app.debug else None
         }), 500
 
 
-def format_phone_number(phone_number):
-    """Format phone number for display"""
+def format_phone_number(phone_number: str) -> str:
+    """Format phone number for display as (XXX) XXX-XXXX"""
     # Remove +1 country code if present
     if phone_number.startswith('+1'):
         phone_number = phone_number[2:]
@@ -320,7 +149,24 @@ def format_phone_number(phone_number):
     return phone_number
 
 
-# Additional endpoints for registration flow
+def _get_province_for_city(city: str) -> str:
+    """Get Canadian province for city"""
+    city_to_province = {
+        'toronto': 'ON',
+        'ottawa': 'ON', 
+        'mississauga': 'ON',
+        'london': 'ON',
+        'hamilton': 'ON',
+        'montreal': 'QC',
+        'vancouver': 'BC',
+        'calgary': 'AB',
+        'edmonton': 'AB',
+        'winnipeg': 'MB'
+    }
+    return city_to_province.get(city.lower(), 'ON')
+
+
+# Keep your existing endpoints like /complete-signup, /cities, etc.
 @signup_bp.route('/cities', methods=['GET'])
 def get_supported_cities():
     """Get list of supported cities with their area codes"""
@@ -336,42 +182,127 @@ def get_supported_cities():
     return jsonify({'cities': cities}), 200
 
 
-@signup_bp.route('/number-info/<phone_number>', methods=['GET'])
-def get_number_info(phone_number):
-    """Get detailed information about a specific phone number"""
+@signup_bp.route('/complete-signup', methods=['POST'])
+def complete_signup():
+    """Complete the registration and purchase the selected phone number"""
     try:
-        client = get_signalwire_client()
+        data = request.json
         
-        # Search for this specific number to get details
-        numbers = client.available_phone_numbers('CA').list(
-            phone_number=phone_number,
-            limit=1
+        # Validate required fields
+        required_fields = [
+            'username', 'email', 'password', 'firstName', 'lastName',
+            'profileName', 'selectedPhoneNumber'
+        ]
+        
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'error': f'{field} is required'}), 400
+        
+        # Validate password confirmation
+        if data.get('password') != data.get('confirmPassword'):
+            return jsonify({'error': 'Passwords do not match'}), 400
+        
+        # Check if username or email already exists
+        existing_user = User.query.filter(
+            (User.username == data['username']) | 
+            (User.email == data['email'])
+        ).first()
+        
+        if existing_user:
+            if existing_user.username == data['username']:
+                return jsonify({'error': 'Username already taken'}), 400
+            else:
+                return jsonify({'error': 'Email already registered'}), 400
+        
+        # Create user
+        user = User(
+            username=data['username'],
+            email=data['email'],
+            first_name=data['firstName'],
+            last_name=data['lastName'],
+            personal_phone=data.get('personalPhone'),
+            timezone=data.get('timezone', 'America/Toronto')
+        )
+        user.set_password(data['password'])
+        
+        db.session.add(user)
+        db.session.flush()  # Get user ID without committing
+        
+        # Create profile
+        profile = Profile(
+            user_id=user.id,
+            name=data['profileName'],
+            description=data.get('profileDescription', ''),
+            phone_number=data['selectedPhoneNumber'],
+            is_active=True,
+            is_default=True
         )
         
-        if not numbers:
-            return jsonify({'error': 'Number not found or no longer available'}), 404
+        db.session.add(profile)
         
-        num = numbers[0]
-        number_info = {
-            'phone_number': num.phone_number,
-            'formatted_number': format_phone_number(num.phone_number),
-            'locality': getattr(num, 'locality', 'Unknown'),
-            'region': getattr(num, 'region', 'ON'),
-            'capabilities': {
-                'sms': getattr(num, 'sms', True),
-                'voice': getattr(num, 'voice', True),
-                'mms': getattr(num, 'mms', True)
+        # Now purchase the phone number from SignalWire
+        selected_number = data['selectedPhoneNumber']
+        logger.info(f"Purchasing SignalWire number {selected_number} for user {user.username}")
+        
+        try:
+            client = get_signalwire_client()
+            if client:
+                # Purchase the number with webhook configuration
+                webhook_url = f"https://backend.assitext.ca/api/webhooks/signalwire"
+                
+                purchased_number = client.incoming_phone_numbers.create(
+                    phone_number=selected_number,
+                    friendly_name=f"SMS AI - {data['profileName']}",
+                    sms_url=webhook_url,
+                    sms_method='POST'
+                )
+                
+                logger.info(f"Successfully purchased {selected_number} with SID {purchased_number.sid}")
+                
+                # Update profile with SignalWire SID
+                profile.signalwire_phone_sid = purchased_number.sid
+                
+            else:
+                logger.warning("SignalWire client unavailable during signup - number not purchased")
+                
+        except Exception as purchase_error:
+            logger.error(f"Failed to purchase number {selected_number}: {str(purchase_error)}")
+            # Continue with signup even if purchase fails - can be retried later
+        
+        # Commit all changes
+        db.session.commit()
+        
+        # Generate JWT tokens
+        from flask_jwt_extended import create_access_token, create_refresh_token
+        
+        access_token = create_access_token(identity=user.id)
+        refresh_token = create_refresh_token(identity=user.id)
+        
+        logger.info(f"Registration completed for user {user.username} with profile {profile.name}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Account created successfully!',
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name
             },
-            'is_available': True
-        }
-        
-        return jsonify(number_info), 200
+            'profile': {
+                'id': profile.id,
+                'name': profile.name,
+                'phone_number': profile.phone_number
+            },
+            'access_token': access_token,
+            'refresh_token': refresh_token
+        }), 201
         
     except Exception as e:
-        logger.error(f"Error getting number info: {str(e)}")
+        db.session.rollback()
+        logger.error(f"Complete signup error: {str(e)}")
         return jsonify({
-            'error': 'Failed to get number information',
-            'details': str(e)
+            'error': 'Registration failed. Please try again.',
+            'details': str(e) if current_app.debug else None
         }), 500
-
-
