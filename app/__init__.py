@@ -275,5 +275,5 @@ def create_database_tables(app):
 
 # For development server
 if __name__ == '__main__':
-    app = create_app('development')
+    app = create_app('production')
     app.run(debug=True, host='0.0.0.0', port=8000)
