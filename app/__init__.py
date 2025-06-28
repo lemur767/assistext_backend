@@ -45,7 +45,8 @@ def create_app(config_name='production'):
     CORS(app, origins=[
         "http://localhost:3000", 
         "http://localhost:3173",
-        "https://yourdomain.com"
+        "https://assitext.ca",
+        "https://www.assitext.ca"
     ])
     
     # Initialize rate limiting - PROPERLY SCOPED
@@ -161,7 +162,16 @@ def register_routes(app, api, limiter):
                 '/api/signup/complete-signup'
             ]
         }, 200
-    
+    @app.route('/api/webhooks')
+    def webooks_endpoint():
+        try:
+            from app.api.webhooks import webhooks_bp
+            app.register_blueprint(webhooks_bp, url_prefix='/api/webhooks')
+            print("✅ Webhooks route registered")
+        except ImportError as e:
+            print(f"⚠️ Could not import webhook route: {e}")
+        except Exception as e:
+            print(f"⚠️ Error registering webhook route: {e}")
     # Register authentication routes
     try:
         from app.api.auth import register_auth_routes
@@ -227,7 +237,7 @@ def register_basic_signup_routes(app):
         return {
             'error': 'Complete signup not available - check signup module'
         }, 501
-
+    
 def register_error_handlers(app):
     """Register global error handlers"""
     
@@ -277,4 +287,4 @@ def create_database_tables(app):
 # For development server
 if __name__ == '__main__':
     app = create_app('production')
-    app.run(debug=True, host='0.0.0.0', port=8000)
+    app.run(debug=True, host='0.0.0.0', port=5000)
