@@ -3,7 +3,6 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models.profile import Profile
 from app.models.message import Message
 from app.models.user import User
-from app.utils.signalwire_helpers import get_signalwire_integration_status
 from datetime import datetime, timedelta
 import logging
 

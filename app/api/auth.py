@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 import logging
 import uuid
 from signalwire.rest import Client as SignalWireClient
-from app.utils.signalwire_helpers import get_signalwire_client
 
 
 logger = logging.getLogger(__name__)

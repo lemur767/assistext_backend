@@ -3,7 +3,6 @@
 from flask import Blueprint, jsonify
 from flask_restful import Resource, Api
 from flask_jwt_extended import jwt_required
-from app.utils.signalwire_helpers import test_signalwire_connection, get_purchased_numbers
 import logging
 
 logger = logging.getLogger(__name__)

@@ -1,7 +1,8 @@
 # app/api/signalwire.py
 from flask import Blueprint, request, jsonify, current_app
+from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.utils.signalwire_helpers import (
+from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
     get_signalwire_client, 
     get_available_phone_numbers,
     purchase_phone_number,
@@ -10,8 +11,11 @@ from app.utils.signalwire_helpers import (
     validate_signalwire_webhook_request
 )
 from app.models.profile import Profile
+from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
 from app.models.user import User
+from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
 from app.extensions import db
+from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
 import logging
 
 logger = logging.getLogger(__name__)
@@ -197,7 +201,6 @@ def configure_phone_webhook(phone_number):
 def get_signalwire_status():
     """Get SignalWire account status and configuration"""
     try:
-        from app.utils.signalwire_helpers import get_signalwire_status
         
         status = get_signalwire_status()
         return jsonify(status), 200

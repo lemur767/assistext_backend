@@ -1,14 +1,16 @@
 # app/services/signalwire_service.py - SignalWire service integration
 
-from app.utils.signalwire_helpers import (
     setup_all_signalwire_webhooks, 
     get_signalwire_phone_numbers, 
     get_signalwire_integration_status,
     configure_profile_signalwire_webhook
 )
 from app.models.profile import Profile
+from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
 from app.extensions import db
+from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
 from datetime import datetime
+from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
 import logging
 
 logger = logging.getLogger(__name__)

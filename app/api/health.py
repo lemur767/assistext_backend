@@ -1,6 +1,5 @@
 from flask import Blueprint, jsonify
 from app.extensions import db
-from app.utils.signalwire_helpers import get_signalwire_integration_status
 from app.models.user import User
 from app.models.profile import Profile
 from app.models.message import Message

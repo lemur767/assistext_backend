@@ -179,6 +179,15 @@ def register_routes(app, api, limiter):
         from app.api.signup import signup_bp
         app.register_blueprint(signup_bp, url_prefix='/api/signup')
         print("✅ Signup blueprint registered")
+    # Register webhooks blueprint
+    try:
+        from app.api.webhooks import webhooks_bp
+        app.register_blueprint(webhooks_bp, url_prefix='/api/webhooks')
+        print("✅ Webhooks blueprint registered")
+    except ImportError as e:
+        print(f"⚠️ Could not import webhooks blueprint: {e}")
+    except Exception as e:
+        print(f"⚠️ Error registering webhooks blueprint: {e}")
     except ImportError as e:
         print(f"⚠️ Could not import signup blueprint: {e}")
         # Create basic signup endpoints as fallback

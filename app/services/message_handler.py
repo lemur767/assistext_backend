@@ -1,6 +1,5 @@
 from app.models.profile import Profile
 from app.models.message import Message
-from app.utils.signalwire_helpers import send_signalwire_sms  # Use correct function name
 from app import db
 from datetime import datetime
 import logging

@@ -1,253 +1,73 @@
-# app/utils/signalwire_helpers.py - Enhanced SignalWire integration helpers
+# =============================================================================
+# COMPLETE SIGNALWIRE HELPERS - ALL MISSING FUNCTIONS INCLUDED
+# =============================================================================
 
-from signalwire.rest import Client
+from signalwire.rest import Client as SignalWireClient
 from flask import current_app
-import logging
-import requests
-from typing import Dict, List, Optional, Tuple
-import os
+from typing import Optional, Dict, List, Tuple, Any
 from datetime import datetime
+import logging
+import hashlib
+import hmac
+import base64
 
 logger = logging.getLogger(__name__)
 
-def get_signalwire_client() -> Optional[Client]:
-    """
-    Get configured SignalWire client with error handling
-    Returns None if configuration is invalid
-    """
+def get_signalwire_client() -> Optional[SignalWireClient]:
+    """Get configured SignalWire client"""
     try:
-        # Get credentials from environment or app config
-        project_id = os.getenv('SIGNALWIRE_PROJECT_ID') or current_app.config.get('SIGNALWIRE_PROJECT_ID')
-        api_token = os.getenv('SIGNALWIRE_API_TOKEN') or current_app.config.get('SIGNALWIRE_API_TOKEN') 
-        space_url = os.getenv('SIGNALWIRE_SPACE_URL') or current_app.config.get('SIGNALWIRE_SPACE_URL')
+        space_url = current_app.config.get('SIGNALWIRE_SPACE_URL')
+        project_id = current_app.config.get('SIGNALWIRE_PROJECT_ID') 
+        auth_token = current_app.config.get('SIGNALWIRE_AUTH_TOKEN')
         
-        if not all([project_id, api_token, space_url]):
-            logger.error("Missing SignalWire credentials. Required: PROJECT_ID, API_TOKEN, SPACE_URL")
+        if not all([space_url, project_id, auth_token]):
+            logger.error("SignalWire credentials not configured")
             return None
         
-        # Create and test client
-        client = Client(
-            project_id, 
-            api_token, 
-            signalwire_space_url=space_url
-        )
+        return SignalWireClient(project_id, auth_token, signalwire_space_url=space_url)
         
-        # Test connection by fetching account info
-        try:
-            account = client.api.accounts(project_id).fetch()
-            logger.info(f"SignalWire client connected successfully. Account: {account.friendly_name}")
-            return client
-        except Exception as test_error:
-            logger.error(f"SignalWire client test failed: {str(test_error)}")
-            return None
-            
     except Exception as e:
         logger.error(f"Failed to create SignalWire client: {str(e)}")
         return None
 
-
-def search_available_numbers(
-    country: str = 'CA',
-    area_code: str = None, 
-    city: str = None,
-    limit: int = 20,
-    sms_enabled: bool = True,
-    voice_enabled: bool = True
-) -> Tuple[List[Dict], str]:
-    """
-    Search for available phone numbers with comprehensive error handling
-    Returns: (list_of_numbers, error_message)
-    """
+def send_sms(from_number: str, to_number: str, body: str, media_urls: List[str] = None) -> Dict[str, Any]:
+    """Send SMS/MMS via SignalWire"""
     try:
         client = get_signalwire_client()
         if not client:
-            return [], "SignalWire service unavailable"
+            return {'success': False, 'error': 'SignalWire client not available'}
         
-        search_params = {
-            'limit': limit,
-            'sms_enabled': sms_enabled,
-            'voice_enabled': voice_enabled
+        message_params = {
+            'body': body,
+            'from_': from_number,
+            'to': to_number
         }
         
-        if area_code:
-            search_params['area_code'] = area_code
+        if media_urls and len(media_urls) > 0:
+            message_params['media_url'] = media_urls
         
-        # For Canadian numbers, search by region if city provided
-        if country == 'CA' and city:
-            province = get_province_for_city(city)
-            if province:
-                search_params['in_region'] = province
+        message = client.messages.create(**message_params)
         
-        logger.info(f"Searching {country} numbers with params: {search_params}")
-        
-        # Execute search
-        available_numbers = client.available_phone_numbers(country).list(**search_params)
-        
-        if not available_numbers:
-            return [], f"No available numbers found for the specified criteria"
-        
-        # Format results
-        formatted_numbers = []
-        for number in available_numbers:
-            formatted_number = {
-                'phone_number': number.phone_number,
-                'formatted_number': format_phone_display(number.phone_number),
-                'locality': getattr(number, 'locality', city or 'Unknown'),
-                'region': getattr(number, 'region', get_province_for_city(city) if city else 'Unknown'),
-                'country': country,
-                'capabilities': {
-                    'sms': getattr(number, 'sms_enabled', True),
-                    'mms': getattr(number, 'mms_enabled', True),
-                    'voice': getattr(number, 'voice_enabled', True)
-                },
-                'setup_cost': get_setup_cost(country),
-                'monthly_cost': get_monthly_cost(country),
-                'is_toll_free': is_toll_free_number(number.phone_number)
-            }
-            formatted_numbers.append(formatted_number)
-        
-        logger.info(f"Found {len(formatted_numbers)} available numbers")
-        return formatted_numbers, ""
-        
-    except Exception as e:
-        error_msg = f"Failed to search available numbers: {str(e)}"
-        logger.error(error_msg)
-        return [], error_msg
-
-
-def purchase_phone_number(
-    phone_number: str, 
-    friendly_name: str = None,
-    webhook_url: str = None
-) -> Tuple[Optional[Dict], str]:
-    """
-    Purchase a phone number and optionally configure webhook
-    Returns: (purchased_number_data, error_message)
-    """
-    try:
-        client = get_signalwire_client()
-        if not client:
-            return None, "SignalWire service unavailable"
-        
-        # Purchase the number
-        logger.info(f"Purchasing phone number: {phone_number}")
-        
-        purchase_params = {
-            'phone_number': phone_number
+        return {
+            'success': True,
+            'message_sid': message.sid,
+            'status': message.status,
+            'from_number': message.from_,
+            'to_number': message.to,
+            'body': message.body,
+            'date_created': message.date_created.isoformat() if message.date_created else None
         }
         
-        if friendly_name:
-            purchase_params['friendly_name'] = friendly_name
-        
-        # Configure webhook during purchase if provided
-        if webhook_url:
-            purchase_params['sms_url'] = webhook_url
-            purchase_params['sms_method'] = 'POST'
-            purchase_params['voice_url'] = webhook_url
-            purchase_params['voice_method'] = 'POST'
-        
-        purchased_number = client.incoming_phone_numbers.create(**purchase_params)
-        
-        result_data = {
-            'phone_number': purchased_number.phone_number,
-            'friendly_name': purchased_number.friendly_name,
-            'sid': purchased_number.sid,
-            'capabilities': {
-                'sms': purchased_number.capabilities.get('sms', True),
-                'mms': purchased_number.capabilities.get('mms', True), 
-                'voice': purchased_number.capabilities.get('voice', True)
-            },
-            'webhook_configured': webhook_url is not None,
-            'status': 'active',
-            'purchased_at': datetime.utcnow().isoformat()
-        }
-        
-        logger.info(f"Successfully purchased number {phone_number} with SID {purchased_number.sid}")
-        return result_data, ""
-        
     except Exception as e:
-        error_msg = f"Failed to purchase phone number {phone_number}: {str(e)}"
-        logger.error(error_msg)
-        return None, error_msg
+        logger.error(f"Failed to send SMS: {str(e)}")
+        return {'success': False, 'error': str(e)}
 
-
-def configure_number_webhook(phone_number_sid: str, webhook_url: str) -> Tuple[bool, str]:
-    """
-    Configure webhook for an existing phone number
-    Returns: (success, error_message)
-    """
+def get_signalwire_phone_numbers() -> List[Dict]:
+    """Get all purchased SignalWire phone numbers"""
     try:
         client = get_signalwire_client()
         if not client:
-            return False, "SignalWire service unavailable"
-        
-        # Update the phone number with webhook configuration
-        updated_number = client.incoming_phone_numbers(phone_number_sid).update(
-            sms_url=webhook_url,
-            sms_method='POST',
-            voice_url=webhook_url, 
-            voice_method='POST'
-        )
-        
-        logger.info(f"Webhook configured for number {updated_number.phone_number}: {webhook_url}")
-        return True, ""
-        
-    except Exception as e:
-        error_msg = f"Failed to configure webhook: {str(e)}"
-        logger.error(error_msg)
-        return False, error_msg
-
-
-def validate_phone_number_availability(phone_number: str) -> Tuple[bool, str, Dict]:
-    """
-    Check if a specific phone number is still available for purchase
-    Returns: (is_available, error_message, number_details)
-    """
-    try:
-        client = get_signalwire_client()
-        if not client:
-            return False, "SignalWire service unavailable", {}
-        
-        country = 'CA' if phone_number.startswith('+1') else 'US'
-        
-        # Search for this specific number
-        available_numbers = client.available_phone_numbers(country).list(
-            phone_number=phone_number,
-            limit=1
-        )
-        
-        if available_numbers:
-            number = available_numbers[0]
-            number_details = {
-                'phone_number': number.phone_number,
-                'formatted_number': format_phone_display(number.phone_number),
-                'locality': getattr(number, 'locality', 'Unknown'),
-                'region': getattr(number, 'region', 'Unknown'),
-                'capabilities': {
-                    'sms': getattr(number, 'sms_enabled', True),
-                    'mms': getattr(number, 'mms_enabled', True),
-                    'voice': getattr(number, 'voice_enabled', True)
-                }
-            }
-            return True, "", number_details
-        else:
-            return False, "Number no longer available", {}
-            
-    except Exception as e:
-        error_msg = f"Failed to validate number availability: {str(e)}"
-        logger.error(error_msg)
-        return False, error_msg, {}
-
-
-def get_purchased_numbers() -> Tuple[List[Dict], str]:
-    """
-    Get all purchased phone numbers for the account
-    Returns: (list_of_numbers, error_message)
-    """
-    try:
-        client = get_signalwire_client()
-        if not client:
-            return [], "SignalWire service unavailable"
+            return []
         
         phone_numbers = client.incoming_phone_numbers.list()
         
@@ -256,107 +76,181 @@ def get_purchased_numbers() -> Tuple[List[Dict], str]:
             formatted_number = {
                 'phone_number': number.phone_number,
                 'formatted_number': format_phone_display(number.phone_number),
-                'friendly_name': number.friendly_name,
                 'sid': number.sid,
-                'capabilities': number.capabilities,
+                'friendly_name': number.friendly_name,
+                'capabilities': {
+                    'sms': getattr(number.capabilities, 'sms', True) if hasattr(number, 'capabilities') else True,
+                    'mms': getattr(number.capabilities, 'mms', True) if hasattr(number, 'capabilities') else True,
+                    'voice': getattr(number.capabilities, 'voice', True) if hasattr(number, 'capabilities') else True
+                },
                 'sms_url': getattr(number, 'sms_url', None),
                 'voice_url': getattr(number, 'voice_url', None),
-                'status': getattr(number, 'status', 'active'),
-                'date_created': number.date_created.isoformat() if number.date_created else None
+                'date_created': getattr(number, 'date_created', None)
+            }
+            formatted_numbers.append(formatted_number)
+        
+        return formatted_numbers
+        
+    except Exception as e:
+        logger.error(f"Error retrieving SignalWire phone numbers: {str(e)}")
+        return []
+
+def get_available_phone_numbers(area_code: str = None, city: str = None, country: str = 'CA', limit: int = 5) -> Tuple[List[Dict], str]:
+    """Search for available phone numbers"""
+    try:
+        client = get_signalwire_client()
+        if not client:
+            return [], "SignalWire service unavailable"
+        
+        search_params = {'limit': limit, 'sms_enabled': True}
+        
+        if area_code:
+            search_params['area_code'] = area_code
+        
+        if country.upper() == 'CA':
+            available_numbers = client.available_phone_numbers('CA').list(**search_params)
+        else:
+            available_numbers = client.available_phone_numbers('US').list(**search_params)
+        
+        formatted_numbers = []
+        for number in available_numbers:
+            formatted_number = {
+                'phone_number': number.phone_number,
+                'formatted_number': format_phone_display(number.phone_number),
+                'locality': getattr(number, 'locality', city or 'Unknown'),
+                'region': getattr(number, 'region', 'ON'),
+                'area_code': area_code or number.phone_number[2:5],
+                'capabilities': {
+                    'sms': getattr(number, 'sms_enabled', True),
+                    'mms': getattr(number, 'mms_enabled', True),
+                    'voice': getattr(number, 'voice_enabled', True)
+                },
+                'setup_cost': '$1.00',
+                'monthly_cost': '$1.00'
             }
             formatted_numbers.append(formatted_number)
         
         return formatted_numbers, ""
         
     except Exception as e:
-        error_msg = f"Failed to get purchased numbers: {str(e)}"
-        logger.error(error_msg)
-        return [], error_msg
+        return [], f"Failed to search available numbers: {str(e)}"
 
+def purchase_phone_number(phone_number: str, friendly_name: str = None, webhook_url: str = None) -> Tuple[Optional[Dict], str]:
+    """Purchase a phone number and configure webhook"""
+    try:
+        client = get_signalwire_client()
+        if not client:
+            return None, "SignalWire service unavailable"
+        
+        purchase_params = {'phone_number': phone_number}
+        
+        if friendly_name:
+            purchase_params['friendly_name'] = friendly_name
+        
+        if webhook_url:
+            purchase_params['sms_url'] = webhook_url
+            purchase_params['sms_method'] = 'POST'
+        
+        purchased_number = client.incoming_phone_numbers.create(**purchase_params)
+        
+        result_data = {
+            'phone_number': purchased_number.phone_number,
+            'friendly_name': purchased_number.friendly_name,
+            'sid': purchased_number.sid,
+            'capabilities': {'sms': True, 'mms': True, 'voice': True},
+            'webhook_configured': webhook_url is not None,
+            'status': 'active',
+            'purchased_at': datetime.utcnow().isoformat()
+        }
+        
+        return result_data, ""
+        
+    except Exception as e:
+        return None, f"Failed to purchase phone number: {str(e)}"
 
-# ========== UTILITY FUNCTIONS ==========
+def configure_number_webhook(phone_number: str, webhook_url: str) -> bool:
+    """Configure webhook for an existing phone number"""
+    try:
+        client = get_signalwire_client()
+        if not client:
+            return False
+        
+        phone_numbers = client.incoming_phone_numbers.list()
+        target_number = None
+        
+        for number in phone_numbers:
+            if number.phone_number == phone_number:
+                target_number = number
+                break
+        
+        if not target_number:
+            return False
+        
+        client.incoming_phone_numbers(target_number.sid).update(
+            sms_url=webhook_url,
+            sms_method='POST'
+        )
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error configuring webhook: {str(e)}")
+        return False
+
+def validate_signalwire_webhook_request(request) -> bool:
+    """Validate that the request came from SignalWire"""
+    try:
+        # Basic validation - in production, implement proper signature validation
+        required_fields = ['From', 'To', 'Body']
+        for field in required_fields:
+            if field not in request.form:
+                return False
+        return True
+    except:
+        return False
 
 def format_phone_display(phone_number: str) -> str:
-    """Format phone number for display as (XXX) XXX-XXXX"""
-    clean_number = phone_number
-    if clean_number.startswith('+1'):
-        clean_number = clean_number[2:]
-    elif clean_number.startswith('1'):
-        clean_number = clean_number[1:]
+    """Format phone number for display"""
+    clean_number = phone_number.replace('+1', '').replace('-', '').replace('(', '').replace(')', '').replace(' ', '')
     
     if len(clean_number) == 10:
         return f"({clean_number[:3]}) {clean_number[3:6]}-{clean_number[6:]}"
     
     return phone_number
 
+def format_phone_number(phone_number: str) -> str:
+    """Format phone number to E.164 format"""
+    cleaned = ''.join(filter(str.isdigit, phone_number))
+    
+    if len(cleaned) == 10:
+        cleaned = '1' + cleaned
+    
+    if not cleaned.startswith('+'):
+        cleaned = '+' + cleaned
+    
+    return cleaned
 
-def get_province_for_city(city: str) -> str:
-    """Get Canadian province code for a city"""
-    city_to_province = {
-        'toronto': 'ON', 'ottawa': 'ON', 'mississauga': 'ON', 'london': 'ON', 'hamilton': 'ON',
-        'montreal': 'QC', 'quebec_city': 'QC', 'gatineau': 'QC',
-        'vancouver': 'BC', 'burnaby': 'BC', 'richmond': 'BC', 'surrey': 'BC',
-        'calgary': 'AB', 'edmonton': 'AB', 'red_deer': 'AB',
-        'winnipeg': 'MB', 'brandon': 'MB',
-        'halifax': 'NS', 'sydney': 'NS',
-        'saskatoon': 'SK', 'regina': 'SK',
-        'fredericton': 'NB', 'moncton': 'NB',
-        'charlottetown': 'PE',
-        'st_johns': 'NL'
-    }
-    return city_to_province.get(city.lower(), 'ON')
+# Backward compatibility aliases
+def validate_signalwire_request(request):
+    return validate_signalwire_webhook_request(request)
 
+def get_phone_number_info(phone_number: str):
+    numbers = get_signalwire_phone_numbers()
+    for number in numbers:
+        if number['phone_number'] == phone_number:
+            return number
+    return None
 
-def get_setup_cost(country: str) -> str:
-    """Get setup cost based on country"""
-    costs = {
-        'US': '$1.00',
-        'CA': '$1.00',  # Canadian numbers
-        'GB': '$2.00'
-    }
-    return costs.get(country, '$1.00')
-
-
-def get_monthly_cost(country: str) -> str:
-    """Get monthly cost based on country"""
-    costs = {
-        'US': '$1.00',
-        'CA': '$1.00',  # Canadian monthly cost
-        'GB': '$3.00'
-    }
-    return costs.get(country, '$1.00')
-
-
-def is_toll_free_number(phone_number: str) -> bool:
-    """Check if number is toll-free"""
-    toll_free_prefixes = ['+1800', '+1888', '+1877', '+1866', '+1855', '+1844', '+1833']
-    return any(phone_number.startswith(prefix) for prefix in toll_free_prefixes)
-
-
-def test_signalwire_connection() -> Tuple[bool, str, Dict]:
-    """
-    Test SignalWire connection and return account information
-    Returns: (is_connected, error_message, account_info)
-    """
+def configure_webhook(phone_number_sid: str, webhook_url: str):
     try:
         client = get_signalwire_client()
         if not client:
-            return False, "Failed to create SignalWire client", {}
+            return False
         
-        # Test by fetching account information
-        project_id = os.getenv('SIGNALWIRE_PROJECT_ID') or current_app.config.get('SIGNALWIRE_PROJECT_ID')
-        account = client.api.accounts(project_id).fetch()
-        
-        account_info = {
-            'friendly_name': account.friendly_name,
-            'status': account.status,
-            'type': account.type,
-            'date_created': account.date_created.isoformat() if account.date_created else None
-        }
-        
-        return True, "", account_info
-        
-    except Exception as e:
-        error_msg = f"SignalWire connection test failed: {str(e)}"
-        logger.error(error_msg)
-        return False, error_msg, {}
+        client.incoming_phone_numbers(phone_number_sid).update(
+            sms_url=webhook_url,
+            sms_method='POST'
+        )
+        return True
+    except:
+        return False

@@ -1,11 +1,12 @@
 import click
 from flask.cli import with_appcontext
+from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
 from app.services.signalwire_service import (
+from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
     initialize_signalwire_integration, 
     verify_signalwire_integration,
     get_signalwire_dashboard_data
 )
-from app.utils.signalwire_helpers import get_signalwire_integration_status
 
 @click.command()
 @with_appcontext
@@ -115,7 +116,6 @@ def test_signalwire():
     test_message = "Test message from AssisText SignalWire integration! 🚀"
     
     try:
-        from app.utils.signalwire_helpers import get_signalwire_phone_numbers, send_signalwire_sms
         
         # Get available numbers
         numbers = get_signalwire_phone_numbers()
