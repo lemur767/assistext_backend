@@ -189,7 +189,12 @@ def register_routes(app, api, limiter):
         from app.api.signup import signup_bp
         app.register_blueprint(signup_bp, url_prefix='/api/signup')
         print("✅ Signup blueprint registered")
-    # Register webhooks blueprint
+    except ImportError as e:
+        print(f"Could not import Signup Routes: {e}")
+    except Exception as e:
+        print(f"Error registering routes: {e}")
+              
+# Register webhooks blueprint
     try:
         from app.api.webhooks import webhooks_bp
         app.register_blueprint(webhooks_bp, url_prefix='/api/webhooks')
