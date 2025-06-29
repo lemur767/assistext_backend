@@ -70,7 +70,7 @@ def create_app(config_name='production'):
 def configure_app_fallback(app):
     """Fallback configuration when config.py is not available"""
     app.config.update(
-        SECRET_KEY=os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production'),
+        SECRET_KEY=os.environ.get('SECRET_KEY'),
         SQLALCHEMY_DATABASE_URI=os.environ.get('DATABASE_URL', 'postgresql://app_user:Assistext2025Secure@localhost/assistext_prod'),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         SQLALCHEMY_ENGINE_OPTIONS={
@@ -80,7 +80,7 @@ def configure_app_fallback(app):
         },
         
         # JWT Configuration
-        JWT_SECRET_KEY=os.environ.get('JWT_SECRET_KEY', 'jwt-secret-key-change-in-production'),
+        JWT_SECRET_KEY=os.environ.get('JWT_SECRET_KEY'),
         JWT_ACCESS_TOKEN_EXPIRES=False,  # Set to timedelta in production
         
         # SignalWire Configuration
@@ -100,7 +100,7 @@ def configure_app_fallback(app):
         MAIL_DEFAULT_SENDER=os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@assistext.ca'),
         
         # Application
-        BASE_URL=os.environ.get('BASE_URL', 'http://localhost:5000')
+        BASE_URL=os.environ.get('BASE_URL', 'https://backend.assitext.ca')
     )
 
 def setup_rate_limiting(app):
