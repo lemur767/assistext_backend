@@ -47,7 +47,8 @@ def create_app(config_name='production'):
         "http://localhost:3173",
         "https://assitext.ca",
         "https://www.assitext.ca"
-    ])
+        
+    ], supports_credentials=True)
     
     # Initialize rate limiting - PROPERLY SCOPED
     limiter = setup_rate_limiting(app)
