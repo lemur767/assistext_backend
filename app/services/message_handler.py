@@ -1,5 +1,9 @@
 from app.models.profile import Profile
 from app.models.message import Message
+<<<<<<< HEAD
+=======
+from app.services.signalwire_service import send_sms_response  # Use correct function name
+>>>>>>> refs/remotes/origin/main
 from app import db
 from datetime import datetime
 import logging
@@ -52,7 +56,7 @@ def handle_incoming_signalwire_message(profile_id, message_text, sender_number,
         response_text = generate_response_for_message(profile, message_text, sender_number)
         
         if response_text:
-            result = send_signalwire_response(
+            result = send_sms_response(
                 profile=profile,
                 response_text=response_text,
                 recipient_number=sender_number,
@@ -92,7 +96,7 @@ def send_signalwire_response(profile, response_text, recipient_number, original_
         
         # Send via SignalWire
         try:
-            signalwire_message = send_signalwire_sms(
+            signalwire_message = send_sms_response(
                 from_number=profile.phone_number,
                 to_number=recipient_number,
                 body=response_text

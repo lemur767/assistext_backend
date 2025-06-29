@@ -6,7 +6,11 @@
     configure_profile_signalwire_webhook
 )
 from app.models.profile import Profile
+<<<<<<< HEAD
 from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
+=======
+from app.models.message import Message
+>>>>>>> refs/remotes/origin/main
 from app.extensions import db
 from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
 from datetime import datetime
@@ -170,12 +174,64 @@ def get_signalwire_dashboard_data():
             'stats': {},
             'profiles': []
         }
-
+def send_sms_response(to_number: str, from_number: str, message_body: str, profile_id: int) -> bool:
+    """
+    Send SMS response via SignalWire and log to database
+    """
+    try:
+        client = get_signalwire_client()
+        if not client:
+            logger.error("SignalWire client not available")
+            return False
+        
+        # Send SMS via SignalWire
+        message = client.messages.create(
+            body=message_body,
+            from_=from_number,  # Your SignalWire number
+            to=to_number        # User's number
+        )
+        
+        # Log outbound message to database
+        outbound_message = Message(
+            profile_id=profile_id,
+            from_number=from_number,
+            to_number=to_number,
+            message_body=message_body,
+            message_sid=message.sid,
+            direction='outbound',
+            status='sent'
+        )
+        db.session.add(outbound_message)
+        db.session.commit()
+        
+        logger.info(f"SMS sent successfully: {message.sid}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error sending SMS: {str(e)}")
+        
+        # Log failed message attempt
+        try:
+            failed_message = Message(
+                profile_id=profile_id,
+                from_number=from_number,
+                to_number=to_number,
+                message_body=message_body,
+                direction='outbound',
+                status='failed'
+            )
+            db.session.add(failed_message)
+            db.session.commit()
+        except:
+            pass
+        
+        return False
 # Re-export functions for convenience
 __all__ = [
     'initialize_signalwire_integration',
     'sync_signalwire_numbers_with_profiles', 
     'verify_signalwire_integration',
     'get_signalwire_dashboard_data',
-    'configure_profile_signalwire_webhook'
+    'configure_profile_signalwire_webhook',
+    'send_sms_response'
 ]

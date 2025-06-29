@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app
 from app.models.profile import Profile
+<<<<<<< HEAD
 from app.extensions import db
 import logging
 
@@ -11,22 +12,42 @@ try:
 except ImportError as e:
     SIGNALWIRE_AVAILABLE = False
     print(f"❌ SignalWire import error in webhooks.py: {e}")
+=======
+from app.models.message import Message  # Assuming you have a Message model
+from app.services.llm_service import generate_ai_response  # Your LLM service
+from app.services.signalwire_service import send_sms_response  # SMS sending service
+import logging
+from app.extensions import db;
+from app.services.signalwire_helpers import format_phone_display;
+>>>>>>> refs/remotes/origin/main
 
 logger = logging.getLogger(__name__)
 webhooks_bp = Blueprint('webhooks', __name__)
 
 @webhooks_bp.route('/signalwire/sms', methods=['POST'])
 def handle_incoming_sms():
+<<<<<<< HEAD
     """Handle incoming SMS messages from SignalWire webhook"""
     try:
         # Log the incoming request
         logger.info("Received SignalWire webhook request")
         
+=======
+    """
+    Handle incoming SMS messages from SignalWire webhook
+    Process message and send AI-generated response
+    """
+    try:
+>>>>>>> refs/remotes/origin/main
         # Get webhook data from SignalWire
         from_number = request.form.get('From')
         to_number = request.form.get('To')
         message_body = request.form.get('Body', '').strip()
         message_sid = request.form.get('MessageSid')
+<<<<<<< HEAD
+=======
+        account_sid = request.form.get('AccountSid')
+>>>>>>> refs/remotes/origin/main
         
         logger.info(f"Incoming SMS: From={from_number}, To={to_number}, Body='{message_body}'")
         
@@ -41,6 +62,7 @@ def handle_incoming_sms():
             logger.warning(f"No active profile found for number {to_number}")
             return '<?xml version="1.0" encoding="UTF-8"?><Response></Response>', 200
         
+<<<<<<< HEAD
         # Generate basic auto-response
         try:
             message_lower = message_body.lower().strip()
@@ -71,6 +93,43 @@ def handle_incoming_sms():
             else:
                 logger.warning("AI response not sent - SignalWire not available or no response generated")
         
+=======
+        # Save incoming message to database
+        incoming_message = Message(
+            profile_id=profile.id,
+            from_number=from_number,
+            to_number=to_number,
+            message_body=message_body,
+            message_sid=message_sid,
+            direction='inbound',
+            status='received'
+        )
+        db.session.add(incoming_message)
+        db.session.commit()
+        
+        # Generate AI response using your LLM service
+        try:
+            ai_response = generate_ai_response(
+                message_body=message_body,
+                from_number=from_number,
+                profile=profile
+            )
+            
+            if ai_response:
+                # Send AI response back via SignalWire
+                response_sent = send_sms_response(
+                    to_number=from_number,
+                    from_number=to_number,
+                    message_body=ai_response,
+                    profile_id=profile.id
+                )
+                
+                if response_sent:
+                    logger.info(f"AI response sent successfully to {from_number}")
+                else:
+                    logger.error(f"Failed to send AI response to {from_number}")
+            
+>>>>>>> refs/remotes/origin/main
         except Exception as ai_error:
             logger.error(f"Error generating/sending AI response: {str(ai_error)}")
         
@@ -80,6 +139,7 @@ def handle_incoming_sms():
     except Exception as e:
         logger.error(f"Error handling incoming SMS webhook: {str(e)}")
         return '<?xml version="1.0" encoding="UTF-8"?><Response></Response>', 500
+<<<<<<< HEAD
 
 @webhooks_bp.route('/test', methods=['GET', 'POST'])
 def test_webhook():
@@ -116,3 +176,5 @@ def test_sms_webhook():
             'status': 'error',
             'error': str(e)
         }), 500
+=======
+>>>>>>> refs/remotes/origin/main
