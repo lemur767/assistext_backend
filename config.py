@@ -17,7 +17,7 @@ class Config:
     SIGNALWIRE_AUTH_TOKEN = os.environ.get('SIGNALWIRE_AUTH_TOKEN')
     
     # Application
-    BASE_URL = os.environ.get('BASE_URL', 'http://localhost:8000')
+    BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000')
 
 class DevelopmentConfig(Config):
     """Development configuration"""

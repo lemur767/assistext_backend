@@ -35,8 +35,8 @@ pidfile = "/var/run/gunicorn/assistext_backend.pid"
 tmp_upload_dir = None
 
 # SSL (if needed)
-keyfile = "/etc/letsencrypt/live/backend.assitext.ca/fullchain.pem";
-certfile = "/etc/letsencrypt/live/backend.assitext.ca/cert.pem";
+keyfile = "/etc/letsencrypt/live/backend.assitext.ca/fullchain.pem"
+certfile = "/etc/letsencrypt/live/backend.assitext.ca/cert.pem"
 
 # Preload application for better performance
 preload_app = True

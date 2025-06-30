@@ -1,4 +1,4 @@
-# app/extensions.py - No Celery version
+# app/extensions.py - Clean extensions initialization
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
@@ -10,5 +10,9 @@ migrate = Migrate()
 jwt = JWTManager()
 socketio = SocketIO()
 
-# Celery disabled
-celery = None
+# Optional Celery (if you're using it)
+try:
+    from celery import Celery
+    celery = Celery(__name__)
+except ImportError:
+    celery = None
