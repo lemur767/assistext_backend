@@ -44,7 +44,6 @@ def create_app(config_name='production'):
     # Enable CORS
     CORS(app, origins=[
         "http://localhost:3000", 
-        "http://localhost:3173",
         "https://assitext.ca",
         "https://www.assitext.ca"
         

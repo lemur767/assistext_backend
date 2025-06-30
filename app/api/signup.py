@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 
 # Replace signup.py with all functions inline to avoid import issues
 cat > /opt/assistext_backend/app/api/signup.py << 'EOF'
@@ -6,6 +7,8 @@ cat > /opt/assistext_backend/app/api/signup.py << 'EOF'
 >>>>>>> refs/remotes/origin/main
 # app/api/signup.py - Registration endpoints with inline SignalWire functions
 
+=======
+>>>>>>> refs/remotes/origin/main
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import create_access_token, create_refresh_token
 from app.models.user import User
@@ -45,7 +48,7 @@ CANADA_AREA_CODES = {
 # INLINE SIGNALWIRE FUNCTIONS - No external imports needed
 # =============================================================================
 
-def get_signalwire_client() -> Optional[SignalWireClient]:
+def get_signalwire_client():
     """Get configured SignalWire client - INLINE VERSION"""
     try:
         if not SIGNALWIRE_CLIENT_AVAILABLE:
@@ -63,7 +66,7 @@ def get_signalwire_client() -> Optional[SignalWireClient]:
             logger.error(f"Missing: space_url={not space_url}, project_id={not project_id}, auth_token={not auth_token}")
             return None
         
-        client = SignalWireClient(project_id, auth_token, signalwire_space_url=space_url)
+        client = SignalWireClient(project_id, auth_token, space_url)
         logger.info("SignalWire client created successfully")
         return client
         
