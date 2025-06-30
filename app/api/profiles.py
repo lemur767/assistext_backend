@@ -6,11 +6,12 @@ from app.models.user import User
 from app.extensions import db
 from datetime import datetime
 import logging
+from signalwire.rest import Client as SignalWireClient
 
 # Import SignalWire functions - only once, cleanly
 try:
     from app.utils.signalwire_helpers import (
-        get_signalwire_client,
+        
         send_sms,
         get_signalwire_phone_numbers,
         configure_number_webhook,

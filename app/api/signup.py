@@ -1,14 +1,5 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
 
-# Replace signup.py with all functions inline to avoid import issues
-cat > /opt/assistext_backend/app/api/signup.py << 'EOF'
-=======
->>>>>>> refs/remotes/origin/main
-# app/api/signup.py - Registration endpoints with inline SignalWire functions
-
-=======
->>>>>>> refs/remotes/origin/main
+# app/api/signup.py - Registration endpoints with inline Si
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import create_access_token, create_refresh_token
 from app.models.user import User
@@ -475,8 +466,4 @@ def test_signup():
     }), 200
 
 # Log the module loading
-<<<<<<< HEAD
 logger.info(f"Signup blueprint loaded with inline SignalWire functions - Client available: {SIGNALWIRE_CLIENT_AVAILABLE}")
-=======
-logger.info(f"Signup blueprint loaded with inline SignalWire functions - Client available: {SIGNALWIRE_CLIENT_AVAILABLE}")
->>>>>>> refs/remotes/origin/main
