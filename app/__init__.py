@@ -203,12 +203,7 @@ def register_routes(app, api, limiter):
         print(f"⚠️ Could not import webhooks blueprint: {e}")
     except Exception as e:
         print(f"⚠️ Error registering webhooks blueprint: {e}")
-    except ImportError as e:
-        print(f"⚠️ Could not import signup blueprint: {e}")
-        # Create basic signup endpoints as fallback
-        register_basic_signup_routes(app)
-    except Exception as e:
-        print(f"⚠️ Error registering signup blueprint: {e}")
+    
     try:
         from app.api.signalwire_test import signalwire_test_bp
         app.register_blueprint(signalwire_test_bp, url_prefix='/api/signalwire')
