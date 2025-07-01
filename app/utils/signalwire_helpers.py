@@ -191,7 +191,20 @@ def validate_signalwire_webhook_request(request) -> bool:
     except Exception as e:
         logger.error(f"Error validating webhook request: {str(e)}")
         return False
-
+def validate_signalwire_request(request) -> bool:
+    try:
+        signalwire_token=os.environ.get('SIGNALWIRE_AUTH_TOKEN')
+        if not signalwire_token:
+            return False
+        signature=request.headers.get('X-SignalWire-Signature')
+        if not signature:
+            return False
+        else:
+            return True
+    except Exception as e:
+        print(f"Error Validating Signalwire Request: {e}")
+        return False
+    
 # Backward compatibility functions
 def get_signalwire_phone_numbers():
     """Get all purchased SignalWire phone numbers"""
