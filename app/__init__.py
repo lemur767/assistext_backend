@@ -4,7 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager
 from flask_mail import Mail
 from flask_restful import Api
-from flask_cors import CORS
+#from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import os
@@ -42,12 +42,7 @@ def create_app(config_name='production'):
     mail.init_app(app)
     
     # Enable CORS
-    CORS(app, origins=[
-        "http://localhost:3000", 
-        "https://assitext.ca",
-        "https://www.assitext.ca"
-        
-    ], supports_credentials=True)
+   # CORS(app, origins=["http://localhost:3000","https://assitext.ca","https://www.assitext.ca"], supports_credentials=True)
     
     # Initialize rate limiting - PROPERLY SCOPED
     limiter = setup_rate_limiting(app)
