@@ -27,8 +27,20 @@ FLASK_APP=wsgi.py
 FLASK_ENV=production
 SECRET_KEY=eGJheGYyeGZmbHgxNng5NXhjYXhiM3hkZnhlNnhiOHhiOXg5N3g4ZXhmNUJwU3gxMw==
 
+# Application URLs
+BASE_URL=https://backend.assitext.ca
+FRONTEND_URL=https://assitext.ca
+
 # Database Configuration
-DATABASE_URL=postgresql://admin:password@localhost/assistext_db
+DATABASE_URL=postgresql://app_user:Assistext2025Secure@localhost/assistext_prod
+
+# JWT Configuration
+JWT_SECRET_KEY=xbaxf2xfflx16x95xcaxb3xdfxe6xb5!x1excaxd6x15Cxd7x97x08xb9x97x8exf5BpSx13
+
+# Redis Configuration
+REDIS_URL=redis://:Assistext2025Secure@localhost:6379/0
+CELERY_BROKER_URL=redis://:Assistext2025Secure@localhost:6379/0
+CELERY_RESULT_BACKEND=redis://:Assistext2025Secure@localhost:6379/0
 
 # SignalWire Configuration (UPDATE WITH YOUR ACTUAL CREDENTIALS)
 SIGNALWIRE_PROJECT=de26db73-cf95-4570-9d3a-bb44c08eb70e
@@ -40,15 +52,14 @@ WEBHOOK_BASE_URL=https://backend.assitext.ca
 WEBHOOK_VALIDATION=true
 
 # LLM Server Configuration
-LLM_SERVER_URL=http://10.0.0.102:8080/v1/chat/completions
-LLM_API_KEY=local-api-key
-LLM_MODEL=llama2
+LLM_SERVER_URL=http://10.0.0.4:8080/v1/chat/completions
+LLM_MODEL=dolphin-mistral:7b-v2.8
 
-# Redis Configuration
-REDIS_URL=redis://localhost:6379/0
+
+
 
 # Security Settings
-WEBHOOK_SECRET=your-webhook-secret-key
+WEBHOOK_SECRET=afdsfwra453afa77aagzbbzvbzzxxcc
 EOF
 
 echo "✅ Updated environment configuration"
