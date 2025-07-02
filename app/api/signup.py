@@ -77,41 +77,53 @@ def format_phone_display(phone_number: str) -> str:
     
     return phone_number
 
+# Fixed scripts/fix_helpers.sh - get_available_phone_numbers function
+
 def get_available_phone_numbers(area_code: str = None, city: str = None, country: str = 'CA', limit: int = 5) -> Tuple[List[Dict], str]:
-    """Search for available phone numbers - INLINE VERSION"""
+    """Search for available phone numbers with proper regional parameters"""
     try:
-        logger.info(f"Searching for numbers: area_code={area_code}, city={city}, country={country}")
-        
         client = get_signalwire_client()
         if not client:
-            error_msg = "SignalWire service unavailable - client not initialized"
-            logger.error(error_msg)
-            return [], error_msg
+            return [], "SignalWire service unavailable"
         
+        # ✅ FIX: Build search parameters properly
         search_params = {'limit': limit, 'sms_enabled': True}
         
         if area_code:
             search_params['area_code'] = area_code
         
-        logger.info(f"Search params: {search_params}")
+        # ✅ FIX: Add regional parameters for Canadian searches
+        if country.upper() == 'CA' and city:
+            # Map cities to provinces  
+            city_to_province = {
+                'toronto': 'ON', 'ottawa': 'ON', 'mississauga': 'ON', 'london': 'ON', 'hamilton': 'ON','burlington':'ON','niagra':'on',
+                'montreal': 'QC', 'quebec_city': 'QC',
+                'vancouver': 'BC',
+                'calgary': 'AB', 'edmonton': 'AB',
+                'winnipeg': 'MB',
+                'halifax': 'NS',
+                'st johns':'NB', 
+                'saskatoon': 'SK', 'regina': 'SK'
+            }
+            
+            province = city_to_province.get(city.lower(), 'ON')
+            search_params['in_region'] = province
+            search_params['in_locality'] = city.title()
         
-        # Search for numbers
+        # ✅ FIX: Use .local.list() instead of just .list()
         if country.upper() == 'CA':
-            available_numbers = client.available_phone_numbers('CA').list(**search_params)
+            available_numbers = client.available_phone_numbers('CA').local.list(**search_params)
         else:
-            available_numbers = client.available_phone_numbers('US').list(**search_params)
+            available_numbers = client.available_phone_numbers('US').local.list(**search_params)
         
-        logger.info(f"Found {len(available_numbers)} numbers from SignalWire")
-        
-        # Format results
         formatted_numbers = []
         for number in available_numbers:
             formatted_number = {
                 'phone_number': number.phone_number,
                 'formatted_number': format_phone_display(number.phone_number),
                 'locality': getattr(number, 'locality', city or 'Unknown'),
-                'region': getattr(number, 'region', 'ON'),
-                'area_code': area_code or number.phone_number[2:5] if len(number.phone_number) > 5 else area_code,
+                'region': getattr(number, 'region', search_params.get('in_region', 'ON')),
+                'area_code': area_code or number.phone_number[2:5],
                 'capabilities': {
                     'sms': getattr(number, 'sms_enabled', True),
                     'mms': getattr(number, 'mms_enabled', True),
@@ -122,13 +134,10 @@ def get_available_phone_numbers(area_code: str = None, city: str = None, country
             }
             formatted_numbers.append(formatted_number)
         
-        logger.info(f"Formatted {len(formatted_numbers)} numbers for return")
         return formatted_numbers, ""
         
     except Exception as e:
-        error_msg = f"Failed to search available numbers: {str(e)}"
-        logger.error(error_msg)
-        return [], error_msg
+        return [], f"Failed to search available numbers: {str(e)}"
 
 def purchase_phone_number(phone_number: str, friendly_name: str = None, webhook_url: str = None) -> Tuple[Optional[Dict], str]:
     """Purchase a phone number and configure webhook - INLINE VERSION"""

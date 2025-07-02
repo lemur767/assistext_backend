@@ -1,43 +1,34 @@
 # app/api/signalwire.py
 from flask import Blueprint, request, jsonify, current_app
-from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
-    get_signalwire_client, 
-    get_available_phone_numbers,
-    purchase_phone_number,
-    configure_number_webhook,
-    get_signalwire_phone_numbers,
-    validate_signalwire_webhook_request
-)
+from app.utils.signalwire_helpers import get_signalwire_client, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, get_signalwire_phone_numbers, validate_signalwire_webhook_request
 from app.models.profile import Profile
-from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
-from app.models.user import User
-from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
 from app.extensions import db
-from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
+
 import logging
 
 logger = logging.getLogger(__name__)
 signalwire_bp = Blueprint('signalwire', __name__)
 
 @signalwire_bp.route('/phone-numbers/search', methods=['GET'])
-def search_available_numbers():
-    """Search for available phone numbers"""
+@jwt_required()
+def search_phone_numbers():
+    """Search for available phone numbers with proper regional parameters"""
     try:
-        # Get query parameters
+        # Get search parameters
         area_code = request.args.get('area_code')
-        country = request.args.get('country', 'CA')
+        country = request.args.get('country', 'US')
         contains = request.args.get('contains')
+        city = request.args.get('city')  # ✅ ADD: Get city parameter
         sms_enabled = request.args.get('sms_enabled', 'true').lower() == 'true'
         limit = int(request.args.get('limit', 20))
         
-        logger.info(f"Searching for numbers: area_code={area_code}, country={country}, limit={limit}")
+        logger.info(f"Searching for numbers: area_code={area_code}, city={city}, country={country}, limit={limit}")
         
         # Get SignalWire client
         client = get_signalwire_client()
         
-        # Search for available numbers
+        # ✅ FIX: Build search parameters with regional support
         search_params = {
             'limit': limit,
             'sms_enabled': sms_enabled
@@ -47,34 +38,54 @@ def search_available_numbers():
             search_params['area_code'] = area_code
         if contains:
             search_params['contains'] = contains
+        
+        # ✅ FIX: Add regional parameters for Canadian numbers
+        if country.upper() == 'CA' and city:
+            # Map cities to provinces
+            city_to_province = {
+                'toronto': 'ON', 'ottawa': 'ON', 'mississauga': 'ON', 'london': 'ON', 'hamilton': 'ON',
+                'montreal': 'QC', 'quebec_city': 'QC',
+                'vancouver': 'BC',
+                'calgary': 'AB', 'edmonton': 'AB',
+                'winnipeg': 'MB',
+                'halifax': 'NS',
+                'saskatoon': 'SK', 'regina': 'SK'
+            }
             
+            province = city_to_province.get(city.lower(), 'ON')
+            search_params['in_region'] = province
+            search_params['in_locality'] = city.title()
+            
+        logger.info(f"Search params with regional data: {search_params}")
+        
         # Use SignalWire API to search for numbers
         if country.upper() == 'CA':
-            available_numbers = client.available_phone_numbers('CA').list(**search_params)
+            available_numbers = client.available_phone_numbers('CA').local.list(**search_params)
         else:
-            available_numbers = client.available_phone_numbers('US').list(**search_params)
+            available_numbers = client.available_phone_numbers('US').local.list(**search_params)
         
         # Format response
         formatted_numbers = []
         for num in available_numbers:
             formatted_numbers.append({
                 'phone_number': num.phone_number,
-                'locality': getattr(num, 'locality', None),
-                'region': getattr(num, 'region', None),
+                'locality': getattr(num, 'locality', city or 'Unknown'),
+                'region': getattr(num, 'region', search_params.get('in_region')),
                 'capabilities': {
                     'sms': getattr(num, 'sms', True),
                     'mms': getattr(num, 'mms', True),
                     'voice': getattr(num, 'voice', True)
                 },
-                'price': '1.00',  # Default price - you may want to get actual pricing
-                'friendly_name': f"{num.phone_number} - {getattr(num, 'locality', 'Unknown')}",
+                'price': '1.00',
+                'friendly_name': f"{num.phone_number} - {getattr(num, 'locality', city or 'Unknown')}",
                 'setup_cost': 1.0,
                 'monthly_cost': 1.0
             })
         
         return jsonify({
             'available_numbers': formatted_numbers,
-            'total_found': len(formatted_numbers)
+            'total_found': len(formatted_numbers),
+            'search_params': search_params  # ✅ ADD: Return search params for debugging
         }), 200
         
     except Exception as e:

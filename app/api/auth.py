@@ -5,7 +5,6 @@ from app import db
 from app.models.user import User
 from app.models.profile import Profile
 from marshmallow import Schema, fields, validate, ValidationError
-from datetime import datetime, timedelta
 import logging
 import uuid
 from signalwire.rest import Client as SignalWireClient
@@ -77,167 +76,140 @@ class RegistrationAPI(Resource):
             return {'error': 'Registration failed'}, 500
 
 class PhoneNumberSearchAPI(Resource):
-    """Handle live phone number search via SignalWire API"""
+      
+   def search_phone_numbers(self, city: str, country: str = 'CA', limit: int = 10):
+   
     
-    def post(self):
-        try:
-            data = request.json
-            city = data.get('city', 'toronto').lower()
-            area_code = data.get('area_code')
-            country = data.get('country', 'CA')  # Default to Canada
-            limit = data.get('limit', 10)
-            
-            logger.info(f"Searching SignalWire for numbers: city={city}, area_code={area_code}, country={country}")
-            
-            # Get SignalWire client
-            client = get_signalwire_client()
-            if not client:
-                logger.error("SignalWire client not available")
-                return {
-                    'error': 'SignalWire service unavailable',
-                    'success': False
-                }, 503
-            
-            # Determine area codes to search
-            area_codes_to_search = []
-            if area_code:
-                area_codes_to_search = [area_code]
-            else:
-                # Map cities to area codes for Canadian numbers
-                city_area_codes = {
-                    'toronto': ['416', '647', '437'],
-                    'ottawa': ['613', '343'], 
-                    'vancouver': ['604', '778', '236'],
-                    'montreal': ['514', '438'],
-                    'calgary': ['403', '587', '825'],
-                    'edmonton': ['780', '587', '825'],
-                    'mississauga': ['905', '289', '365'],
-                    'hamilton': ['905', '289'],
-                    'london': ['519', '226', '548'],
-                    'winnipeg': ['204', '431'],
-                    'quebec_city': ['418', '581'],
-                    'halifax': ['902', '782'],
-                    'saskatoon': ['306', '639'],
-                    'regina': ['306', '639']
-                }
-                area_codes_to_search = city_area_codes.get(city, ['416'])  # Default to Toronto
-            
-            all_available_numbers = []
-            
-            # Search across multiple area codes
-            for code in area_codes_to_search:
-                try:
-                    logger.info(f"Searching area code {code} in country {country}")
-                    
-                    # Search for available numbers via SignalWire
-                    available_numbers = client.available_phone_numbers(country).list(
-                        area_code=code,
-                        sms_enabled=True,  # Ensure SMS capability
-                        limit=limit
-                    )
-                    
-                    # Format the response
-                    for number in available_numbers:
-                        formatted_number = self._format_phone_number(number.phone_number)
-                        
-                        number_data = {
-                            'phone_number': number.phone_number,
-                            'formatted_number': formatted_number,
-                            'locality': getattr(number, 'locality', city.title()),
-                            'region': getattr(number, 'region', self._get_province_for_city(city)),
-                            'area_code': code,
-                            'capabilities': {
-                                'sms': getattr(number, 'sms_enabled', True),
-                                'mms': getattr(number, 'mms_enabled', True), 
-                                'voice': getattr(number, 'voice_enabled', True)
-                            },
-                            'setup_cost': '$1.00',  # SignalWire standard setup cost
-                            'monthly_cost': '$1.00',  # Monthly cost for Canadian numbers
-                            'country': country,
-                            'is_toll_free': number.phone_number.startswith('+1800') or number.phone_number.startswith('+1888'),
-                            'friendly_name': f"{formatted_number} - {getattr(number, 'locality', city.title())}"
-                        }
-                        
-                        all_available_numbers.append(number_data)
-                        
-                        # Stop if we have enough numbers
-                        if len(all_available_numbers) >= limit:
-                            break
-                    
-                except Exception as area_error:
-                    logger.warning(f"Failed to search area code {code}: {str(area_error)}")
-                    continue
+    if not city:
+        return {
+            'success': False,
+            'error': 'City parameter is required',
+            'available_numbers': []
+        }, 400
+    
+    try:
+        client = self._get_signalwire_client()
+        if not client:
+            return {
+                'success': False,
+                'error': 'SignalWire service unavailable. Please try again later or contact support.',
+                'available_numbers': []
+            }, 503
+        
+        city = city.lower().strip()
+        
+        if country.upper() == 'CA':
+            # Map cities to area codes for Canadian numbers
+            city_area_codes = {
+                'toronto': ['416', '647', '437'],
+                'ottawa': ['613', '343'], 
+                'vancouver': ['604', '778', '236'],
+                'montreal': ['514', '438'],
+                'calgary': ['403', '587', '825'],
+                'edmonton': ['780', '587', '825'],
+                'mississauga': ['905', '289', '365'],
+                'hamilton': ['905', '289'],
+                'london': ['519', '226', '548'],
+                'winnipeg': ['204', '431'],
+                'quebec_city': ['418', '581'],
+                'halifax': ['902', '782'],
+                'saskatoon': ['306', '639'],
+                'regina': ['306', '639']
+            }
+            area_codes_to_search = city_area_codes.get(city, ['416'])  # Default to Toronto
+        
+        all_available_numbers = []
+        
+       
+        province = self._get_province_for_city(city)
+        
+      
+        for code in area_codes_to_search:
+            try:
+                logger.info(f"Searching area code {code} in country {country} with region {province}")
                 
-                # Break if we have enough numbers
-                if len(all_available_numbers) >= limit:
-                    break
+                
+                search_params = {
+                    'area_code': code,
+                    'sms_enabled': True,
+                    'limit': limit
+                }
+                
+             
+                if country.upper() == 'CA':
+                    search_params['in_region'] = province
+                    search_params['in_locality'] = city.title()
+                
+                
+                available_numbers = client.available_phone_numbers(country).local.list(**search_params)
+                
+                # Format the response
+                for number in available_numbers:
+                    formatted_number = self._format_phone_number(number.phone_number)
+                    
+                    number_data = {
+                        'phone_number': number.phone_number,
+                        'formatted_number': formatted_number,
+                        'locality': getattr(number, 'locality', city.title()),
+                        'region': getattr(number, 'region', province),
+                        'area_code': code,
+                        'capabilities': {
+                            'sms': getattr(number, 'sms_enabled', True),
+                            'mms': getattr(number, 'mms_enabled', True), 
+                            'voice': getattr(number, 'voice_enabled', True)
+                        },
+                        'setup_cost': '$1.00',
+                        'monthly_cost': '$1.00',
+                        'country': country,
+                        'is_toll_free': number.phone_number.startswith('+1800') or number.phone_number.startswith('+1888'),
+                        'friendly_name': f"{formatted_number} - {getattr(number, 'locality', city.title())}"
+                    }
+                    
+                    all_available_numbers.append(number_data)
+                    
+                    # Stop if we have enough numbers
+                    if len(all_available_numbers) >= limit:
+                        break
+                
+            except Exception as area_error:
+                logger.warning(f"Failed to search area code {code}: {str(area_error)}")
+                continue
             
-            if not all_available_numbers:
-                logger.warning(f"No available numbers found for city={city}, area_codes={area_codes_to_search}")
-                return {
-                    'success': True,
-                    'city': city.title(),
-                    'available_numbers': [],
-                    'count': 0,
-                    'message': f'No available numbers found for {city.title()}. Please try a different city or contact support.'
-                }, 200
-            
-            logger.info(f"Found {len(all_available_numbers)} available numbers for {city}")
-            
+            # Break if we have enough numbers
+            if len(all_available_numbers) >= limit:
+                break
+        
+        if not all_available_numbers:
+            logger.warning(f"No available numbers found for city={city}, area_codes={area_codes_to_search}")
             return {
                 'success': True,
                 'city': city.title(),
-                'available_numbers': all_available_numbers,
-                'count': len(all_available_numbers),
-                'searched_area_codes': area_codes_to_search
+                'available_numbers': [],
+                'count': 0,
+                'message': f'No available numbers found for {city.title()}. Please try a different city or contact support.'
             }, 200
-            
-        except Exception as e:
-            logger.error(f"SignalWire phone search error: {str(e)}")
-            return {
-                'error': 'Phone number search failed',
-                'details': str(e),
-                'success': False
-            }, 500
-    
-    def _format_phone_number(self, phone_number: str) -> str:
-        """Format phone number for display"""
-        # Remove +1 country code if present
-        if phone_number.startswith('+1'):
-            phone_number = phone_number[2:]
-        elif phone_number.startswith('1'):
-            phone_number = phone_number[1:]
         
-        # Format as (XXX) XXX-XXXX
-        if len(phone_number) == 10:
-            return f"({phone_number[:3]}) {phone_number[3:6]}-{phone_number[6:]}"
+        logger.info(f"Found {len(all_available_numbers)} available numbers for {city}")
         
-        return phone_number
-    
-    def _get_province_for_city(self, city: str) -> str:
-        """Get province abbreviation for city"""
-        city_to_province = {
-            'toronto': 'ON',
-            'ottawa': 'ON',
-            'mississauga': 'ON',
-            'london': 'ON',
-            'hamilton': 'ON',
-            'montreal': 'QC',
-            'quebec_city': 'QC',
-            'vancouver': 'BC',
-            'calgary': 'AB',
-            'edmonton': 'AB',
-            'winnipeg': 'MB',
-            'halifax': 'NS',
-            'saskatoon': 'SK',
-            'regina': 'SK'
-        }
-        return city_to_province.get(city.lower(), 'ON')
+        return {
+            'success': True,
+            'city': city.title(),
+            'available_numbers': all_available_numbers,
+            'count': len(all_available_numbers),
+            'searched_area_codes': area_codes_to_search
+        }, 200
+        
+    except Exception as e:
+        logger.error(f"SignalWire phone search error: {str(e)}")
+        return {
+            'error': 'Phone number search failed',
+            'details': str(e),
+            'success': False
+        }, 500
 
 
 # Additional endpoint for number validation
 class PhoneNumberValidationAPI(Resource):
-    """Validate and get details about a specific phone number"""
     
     def post(self):
         try:
