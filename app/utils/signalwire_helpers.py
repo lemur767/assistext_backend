@@ -257,3 +257,199 @@ __all__ = [
 
 # Test import at module level
 logger.info("SignalWire helpers module loaded successfully")
+
+def get_signalwire_client():
+    """
+    Get a configured SignalWire client instance
+    
+    Returns:
+        signalwire.rest.Client or None: Configured client or None if not available
+    """
+    try:
+        project_id = os.environ.get('SIGNALWIRE_PROJECT_ID')
+        auth_token = os.environ.get('SIGNALWIRE_AUTH_TOKEN')
+        space_url = os.environ.get('SIGNALWIRE_SPACE_URL')
+        
+        if not all([project_id, auth_token, space_url]):
+            if current_app:
+                current_app.logger.warning("SignalWire credentials not fully configured")
+            return None
+        
+        try:
+            from signalwire.rest import Client
+        except ImportError:
+            if current_app:
+                current_app.logger.error("SignalWire SDK not installed")
+            return None
+        
+        # Create and return client
+        client = Client(project_id, auth_token, signalwire_space_url=space_url)
+        
+        if current_app:
+            current_app.logger.debug("SignalWire client created successfully")
+        
+        return client
+        
+    except Exception as e:
+        if current_app:
+            current_app.logger.error(f"Error creating SignalWire client: {e}")
+        return None
+
+def search_available_phone_numbers(city=None, area_code=None, country='US', limit=10):
+    """
+    Search for available phone numbers (wrapper function for compatibility)
+    
+    Args:
+        city (str): City to search in
+        area_code (str): Area code to search
+        country (str): Country code (US, CA)
+        limit (int): Maximum number of results
+        
+    Returns:
+        dict: Search results with success status and numbers list
+    """
+    try:
+        # Use the existing get_available_numbers function
+        numbers = get_available_numbers(area_code=area_code, city=city, country=country)
+        
+        # Limit results
+        if limit and len(numbers) > limit:
+            numbers = numbers[:limit]
+        
+        return {
+            'success': True,
+            'message': f'Found {len(numbers)} available numbers',
+            'numbers': numbers,
+            'search_params': {
+                'city': city,
+                'area_code': area_code,
+                'country': country,
+                'limit': limit
+            }
+        }
+        
+    except Exception as e:
+        if current_app:
+            current_app.logger.error(f"Error searching phone numbers: {e}")
+        
+        return {
+            'success': False,
+            'error': str(e),
+            'message': 'Phone number search failed',
+            'numbers': []
+        }
+
+def purchase_phone_number(phone_number):
+    """
+    Purchase a phone number from SignalWire
+    
+    Args:
+        phone_number (str): Phone number to purchase
+        
+    Returns:
+        dict: Purchase result
+    """
+    try:
+        client = get_signalwire_client()
+        
+        if not client:
+            return {
+                'success': False,
+                'error': 'SignalWire client not available',
+                'message': 'Cannot purchase number - service not configured'
+            }
+        
+        # Purchase the number
+        purchased_number = client.incoming_phone_numbers.create(phone_number=phone_number)
+        
+        if current_app:
+            current_app.logger.info(f"Successfully purchased number: {phone_number}")
+        
+        return {
+            'success': True,
+            'phone_number': purchased_number.phone_number,
+            'sid': purchased_number.sid,
+            'message': 'Phone number purchased successfully'
+        }
+        
+    except Exception as e:
+        if current_app:
+            current_app.logger.error(f"Error purchasing phone number {phone_number}: {e}")
+        
+        # Return mock success for development
+        if os.environ.get('FLASK_ENV') == 'development':
+            return {
+                'success': True,
+                'phone_number': phone_number,
+                'sid': f'mock_sid_{int(time.time())}',
+                'message': 'Phone number purchased successfully (mock)',
+                'mock': True
+            }
+        
+        return {
+            'success': False,
+            'error': str(e),
+            'message': 'Failed to purchase phone number'
+        }
+
+def configure_phone_number_webhook(phone_number, webhook_url):
+    """
+    Configure webhook URL for a phone number
+    
+    Args:
+        phone_number (str): Phone number to configure
+        webhook_url (str): Webhook URL for incoming messages
+        
+    Returns:
+        dict: Configuration result
+    """
+    try:
+        client = get_signalwire_client()
+        
+        if not client:
+            return {
+                'success': False,
+                'error': 'SignalWire client not available'
+            }
+        
+        # Find the phone number resource
+        numbers = client.incoming_phone_numbers.list(phone_number=phone_number)
+        
+        if not numbers:
+            return {
+                'success': False,
+                'error': 'Phone number not found in account'
+            }
+        
+        # Update the webhook URL
+        number = numbers[0]
+        number.update(sms_url=webhook_url, sms_method='POST')
+        
+        if current_app:
+            current_app.logger.info(f"Configured webhook for {phone_number}: {webhook_url}")
+        
+        return {
+            'success': True,
+            'phone_number': phone_number,
+            'webhook_url': webhook_url,
+            'message': 'Webhook configured successfully'
+        }
+        
+    except Exception as e:
+        if current_app:
+            current_app.logger.error(f"Error configuring webhook for {phone_number}: {e}")
+        
+        return {
+            'success': False,
+            'error': str(e),
+            'message': 'Failed to configure webhook'
+        }
+
+# Legacy function aliases for backward compatibility
+def get_available_phone_numbers(*args, **kwargs):
+    """Legacy alias for get_available_numbers"""
+    return get_available_numbers(*args, **kwargs)
+
+def lookup_phone_number(*args, **kwargs):
+    """Legacy alias for get_phone_number_info"""
+    return get_phone_number_info(*args, **kwargs)
