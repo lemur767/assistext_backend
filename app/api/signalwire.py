@@ -1,10 +1,10 @@
-# app/api/signalwire.py
+
+
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.utils.signalwire_helpers import get_signalwire_client, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, get_signalwire_phone_numbers, validate_signalwire_webhook_request
+from app.utils.signalwire_helpers import get_signalwire_client, get_available_phone_numbers, purchase_phone_number
 from app.models.profile import Profile
 from app.extensions import db
-
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,13 +13,13 @@ signalwire_bp = Blueprint('signalwire', __name__)
 @signalwire_bp.route('/phone-numbers/search', methods=['GET'])
 @jwt_required()
 def search_phone_numbers():
-    """Search for available phone numbers with proper regional parameters"""
+    """Search for available phone numbers with proper regional parameters - FIXED VERSION"""
     try:
         # Get search parameters
         area_code = request.args.get('area_code')
         country = request.args.get('country', 'US')
         contains = request.args.get('contains')
-        city = request.args.get('city')  # ✅ ADD: Get city parameter
+        city = request.args.get('city')  
         sms_enabled = request.args.get('sms_enabled', 'true').lower() == 'true'
         limit = int(request.args.get('limit', 20))
         
@@ -27,8 +27,13 @@ def search_phone_numbers():
         
         # Get SignalWire client
         client = get_signalwire_client()
+        if not client:
+            return jsonify({
+                'error': 'SignalWire service unavailable',
+                'available_numbers': []
+            }), 503
         
-        # ✅ FIX: Build search parameters with regional support
+  
         search_params = {
             'limit': limit,
             'sms_enabled': sms_enabled
@@ -39,17 +44,19 @@ def search_phone_numbers():
         if contains:
             search_params['contains'] = contains
         
-        # ✅ FIX: Add regional parameters for Canadian numbers
+  
         if country.upper() == 'CA' and city:
             # Map cities to provinces
             city_to_province = {
                 'toronto': 'ON', 'ottawa': 'ON', 'mississauga': 'ON', 'london': 'ON', 'hamilton': 'ON',
+                'burlington': 'ON', 'niagara': 'ON',
                 'montreal': 'QC', 'quebec_city': 'QC',
                 'vancouver': 'BC',
                 'calgary': 'AB', 'edmonton': 'AB',
                 'winnipeg': 'MB',
                 'halifax': 'NS',
-                'saskatoon': 'SK', 'regina': 'SK'
+                'saskatoon': 'SK', 'regina': 'SK',
+                'st_johns': 'NL'
             }
             
             province = city_to_province.get(city.lower(), 'ON')
@@ -58,7 +65,7 @@ def search_phone_numbers():
             
         logger.info(f"Search params with regional data: {search_params}")
         
-        # Use SignalWire API to search for numbers
+
         if country.upper() == 'CA':
             available_numbers = client.available_phone_numbers('CA').local.list(**search_params)
         else:
@@ -85,7 +92,7 @@ def search_phone_numbers():
         return jsonify({
             'available_numbers': formatted_numbers,
             'total_found': len(formatted_numbers),
-            'search_params': search_params  # ✅ ADD: Return search params for debugging
+            'search_params': search_params  
         }), 200
         
     except Exception as e:
@@ -100,49 +107,34 @@ def search_phone_numbers():
 def purchase_phone_number_endpoint():
     """Purchase a phone number"""
     try:
-        data = request.json
         user_id = get_jwt_identity()
+        data = request.json
         
         phone_number = data.get('phone_number')
-        profile_id = data.get('profile_id')
-        friendly_name = data.get('friendly_name', f'SMS AI Number')
-        
         if not phone_number:
             return jsonify({'error': 'Phone number is required'}), 400
-            
-        logger.info(f"Purchasing number {phone_number} for user {user_id}")
         
         # Purchase the number
-        purchased_number = purchase_phone_number(
+        result, error = purchase_phone_number(
             phone_number=phone_number,
-            friendly_name=friendly_name
+            friendly_name=data.get('friendly_name'),
+            webhook_url=data.get('webhook_url')
         )
         
-        if not purchased_number:
-            return jsonify({'error': 'Failed to purchase phone number'}), 500
-            
-        # Configure webhook
-        webhook_url = f"{current_app.config['BASE_URL']}/api/webhooks/signalwire/sms"
-        try:
-            configure_number_webhook(phone_number, webhook_url)
-            logger.info(f"Webhook configured for {phone_number}: {webhook_url}")
-        except Exception as webhook_error:
-            logger.warning(f"Webhook configuration failed: {webhook_error}")
-            # Don't fail the purchase for webhook issues
+        if error:
+            return jsonify({'error': error}), 400
+        
+        # Update user's profile with the purchased number
+        profile = Profile.query.filter_by(user_id=user_id).first()
+        if profile:
+            profile.phone_number = phone_number
+            db.session.commit()
         
         return jsonify({
             'success': True,
-            'phone_number': {
-                'phone_number': phone_number,
-                'sid': purchased_number.get('sid'),
-                'friendly_name': friendly_name,
-                'capabilities': {
-                    'sms': True,
-                    'mms': True,
-                    'voice': True
-                }
-            }
-        }), 201
+            'message': 'Phone number purchased successfully',
+            'phone_number': result
+        }), 200
         
     except Exception as e:
         logger.error(f"Error purchasing phone number: {str(e)}")
@@ -151,74 +143,47 @@ def purchase_phone_number_endpoint():
             'details': str(e)
         }), 500
 
-@signalwire_bp.route('/phone-numbers', methods=['GET'])
+@signalwire_bp.route('/phone-numbers/owned', methods=['GET'])
 @jwt_required()
-def get_phone_numbers():
-    """Get all SignalWire phone numbers for the user"""
+def get_owned_phone_numbers():
+    """Get phone numbers owned by the user"""
     try:
         user_id = get_jwt_identity()
         
-        # Get user's phone numbers
-        user_profiles = Profile.query.filter_by(user_id=user_id).all()
-        phone_numbers = [profile.phone_number for profile in user_profiles if profile.phone_number]
+        # Get client
+        client = get_signalwire_client()
+        if not client:
+            return jsonify({'error': 'SignalWire service unavailable'}), 503
         
-        # Get SignalWire phone number details
-        signalwire_numbers = get_signalwire_phone_numbers()
+        # Get owned numbers from SignalWire
+        owned_numbers = client.incoming_phone_numbers.list()
         
-        # Filter to only user's numbers
-        user_numbers = [
-            num for num in signalwire_numbers 
-            if num['phone_number'] in phone_numbers
-        ]
+        # Format response
+        formatted_numbers = []
+        for num in owned_numbers:
+            formatted_numbers.append({
+                'phone_number': num.phone_number,
+                'friendly_name': num.friendly_name,
+                'capabilities': {
+                    'sms': getattr(num, 'sms_enabled', True),
+                    'mms': getattr(num, 'mms_enabled', True),
+                    'voice': getattr(num, 'voice_enabled', True)
+                },
+                'date_created': num.date_created.isoformat() if num.date_created else None,
+                'status': getattr(num, 'status', 'active')
+            })
         
         return jsonify({
-            'phone_numbers': user_numbers,
-            'total_count': len(user_numbers)
+            'owned_numbers': formatted_numbers,
+            'total_count': len(formatted_numbers)
         }), 200
         
     except Exception as e:
-        logger.error(f"Error getting phone numbers: {str(e)}")
-        return jsonify({'error': 'Failed to get phone numbers'}), 500
-
-@signalwire_bp.route('/phone-numbers/<phone_number>/webhook', methods=['PUT'])
-@jwt_required()
-def configure_phone_webhook(phone_number):
-    """Configure webhook for a specific phone number"""
-    try:
-        data = request.json
-        webhook_url = data.get('webhook_url')
-        
-        if not webhook_url:
-            webhook_url = f"{current_app.config['BASE_URL']}/api/webhooks/signalwire/sms"
-        
-        # Configure the webhook
-        configure_number_webhook(phone_number, webhook_url)
-        
+        logger.error(f"Error getting owned phone numbers: {str(e)}")
         return jsonify({
-            'success': True,
-            'phone_number': phone_number,
-            'webhook_url': webhook_url
-        }), 200
-        
-    except Exception as e:
-        logger.error(f"Error configuring webhook for {phone_number}: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
+            'error': 'Failed to get owned phone numbers',
+            'details': str(e)
         }), 500
 
-@signalwire_bp.route('/status', methods=['GET'])
-@jwt_required()
-def get_signalwire_status():
-    """Get SignalWire account status and configuration"""
-    try:
-        
-        status = get_signalwire_status()
-        return jsonify(status), 200
-        
-    except Exception as e:
-        logger.error(f"Error getting SignalWire status: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'error': str(e)
-        }), 500
+# Log successful loading
+logger.info("✅ Fixed SignalWire blueprint loaded successfully")

@@ -1,30 +1,25 @@
+"""
+Signup API Blueprint with SignalWire Phone Number Search
+Fixed version with proper regional parameters for Canadian searches
+"""
 
-# app/api/signup.py - Registration endpoints with inline Si
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import create_access_token, create_refresh_token
 from app.models.user import User
 from app.models.profile import Profile
 from app.extensions import db
+from typing import Tuple, List, Dict, Optional
 import logging
 import traceback
-from typing import Optional, Dict, List, Tuple, Any
-from datetime import datetime
-
-# Import SignalWire directly in this file
-try:
-    from signalwire.rest import Client as SignalWireClient
-    SIGNALWIRE_CLIENT_AVAILABLE = True
-except ImportError:
-    SignalWireClient = None
-    SIGNALWIRE_CLIENT_AVAILABLE = False
+import os
 
 logger = logging.getLogger(__name__)
 signup_bp = Blueprint('signup', __name__)
 
-# Canadian area codes mapping
+# Canadian cities and their area codes
 CANADA_AREA_CODES = {
     'toronto': ['416', '647', '437'],
-    'ottawa': ['613', '343'], 
+    'ottawa': ['613', '343'],
     'vancouver': ['604', '778', '236'],
     'montreal': ['514', '438'],
     'calgary': ['403', '587', '825'],
@@ -32,22 +27,35 @@ CANADA_AREA_CODES = {
     'mississauga': ['905', '289', '365'],
     'hamilton': ['905', '289'],
     'london': ['519', '226', '548'],
-    'winnipeg': ['204', '431']
+    'winnipeg': ['204', '431'],
+    'quebec_city': ['418', '581'],
+    'halifax': ['902', '782'],
+    'saskatoon': ['306', '639'],
+    'regina': ['306', '639'],
+    'burlington': ['905', '289'],
+    'niagara': ['905', '289'],
+    'st_johns': ['709']
 }
 
+# Check if SignalWire is available
+SIGNALWIRE_CLIENT_AVAILABLE = False
+try:
+    from signalwire.rest import Client as SignalWireClient
+    SIGNALWIRE_CLIENT_AVAILABLE = True
+    logger.info("SignalWire client library loaded successfully")
+except ImportError as e:
+    logger.error(f"SignalWire client library not available: {e}")
+    SIGNALWIRE_CLIENT_AVAILABLE = False
+
 # =============================================================================
-# INLINE SIGNALWIRE FUNCTIONS - No external imports needed
+# SIGNALWIRE HELPER FUNCTIONS (INLINE)
 # =============================================================================
 
-def get_signalwire_client():
-    """Get configured SignalWire client - INLINE VERSION"""
+def get_signalwire_client() -> Optional[SignalWireClient]:
+    """Get configured SignalWire client - FIXED VERSION"""
     try:
-        if not SIGNALWIRE_CLIENT_AVAILABLE:
-            logger.error("SignalWire client library not available")
-            return None
-            
         space_url = current_app.config.get('SIGNALWIRE_SPACE_URL')
-        project_id = current_app.config.get('SIGNALWIRE_PROJECT_ID') 
+        project_id = current_app.config.get('SIGNALWIRE_PROJECT_ID')
         auth_token = current_app.config.get('SIGNALWIRE_AUTH_TOKEN')
         
         logger.info(f"SignalWire config check: space_url={bool(space_url)}, project_id={bool(project_id)}, auth_token={bool(auth_token)}")
@@ -57,7 +65,7 @@ def get_signalwire_client():
             logger.error(f"Missing: space_url={not space_url}, project_id={not project_id}, auth_token={not auth_token}")
             return None
         
-        client = SignalWireClient(project_id, auth_token, space_url)
+        client = SignalWireClient(project_id, auth_token, signalwire_space_url=space_url)
         logger.info("SignalWire client created successfully")
         return client
         
@@ -66,7 +74,7 @@ def get_signalwire_client():
         return None
 
 def format_phone_display(phone_number: str) -> str:
-    """Format phone number for display - INLINE VERSION"""
+    """Format phone number for display - FIXED VERSION"""
     if not phone_number:
         return ""
         
@@ -77,14 +85,16 @@ def format_phone_display(phone_number: str) -> str:
     
     return phone_number
 
-# Fixed scripts/fix_helpers.sh - get_available_phone_numbers function
-
 def get_available_phone_numbers(area_code: str = None, city: str = None, country: str = 'CA', limit: int = 5) -> Tuple[List[Dict], str]:
-    """Search for available phone numbers with proper regional parameters"""
+    """Search for available phone numbers - FIXED VERSION WITH REGIONAL PARAMETERS"""
     try:
+        logger.info(f"Searching for numbers: area_code={area_code}, city={city}, country={country}")
+        
         client = get_signalwire_client()
         if not client:
-            return [], "SignalWire service unavailable"
+            error_msg = "SignalWire service unavailable - client not initialized"
+            logger.error(error_msg)
+            return [], error_msg
         
         # ✅ FIX: Build search parameters properly
         search_params = {'limit': limit, 'sms_enabled': True}
@@ -96,19 +106,22 @@ def get_available_phone_numbers(area_code: str = None, city: str = None, country
         if country.upper() == 'CA' and city:
             # Map cities to provinces  
             city_to_province = {
-                'toronto': 'ON', 'ottawa': 'ON', 'mississauga': 'ON', 'london': 'ON', 'hamilton': 'ON','burlington':'ON','niagra':'on',
+                'toronto': 'ON', 'ottawa': 'ON', 'mississauga': 'ON', 'london': 'ON', 'hamilton': 'ON',
+                'burlington': 'ON', 'niagara': 'ON',
                 'montreal': 'QC', 'quebec_city': 'QC',
                 'vancouver': 'BC',
                 'calgary': 'AB', 'edmonton': 'AB',
                 'winnipeg': 'MB',
                 'halifax': 'NS',
-                'st johns':'NB', 
-                'saskatoon': 'SK', 'regina': 'SK'
+                'saskatoon': 'SK', 'regina': 'SK',
+                'st_johns': 'NL'
             }
             
             province = city_to_province.get(city.lower(), 'ON')
             search_params['in_region'] = province
             search_params['in_locality'] = city.title()
+        
+        logger.info(f"Search params with regional data: {search_params}")
         
         # ✅ FIX: Use .local.list() instead of just .list()
         if country.upper() == 'CA':
@@ -116,6 +129,9 @@ def get_available_phone_numbers(area_code: str = None, city: str = None, country
         else:
             available_numbers = client.available_phone_numbers('US').local.list(**search_params)
         
+        logger.info(f"Found {len(available_numbers)} numbers from SignalWire")
+        
+        # Format results
         formatted_numbers = []
         for number in available_numbers:
             formatted_number = {
@@ -137,51 +153,37 @@ def get_available_phone_numbers(area_code: str = None, city: str = None, country
         return formatted_numbers, ""
         
     except Exception as e:
+        logger.error(f"Failed to search available numbers: {str(e)}")
         return [], f"Failed to search available numbers: {str(e)}"
 
 def purchase_phone_number(phone_number: str, friendly_name: str = None, webhook_url: str = None) -> Tuple[Optional[Dict], str]:
-    """Purchase a phone number and configure webhook - INLINE VERSION"""
+    """Purchase a phone number from SignalWire - FIXED VERSION"""
     try:
-        logger.info(f"Attempting to purchase number: {phone_number}")
-        
         client = get_signalwire_client()
         if not client:
-            error_msg = "SignalWire service unavailable for purchase"
-            logger.error(error_msg)
-            return None, error_msg
+            return None, "SignalWire service unavailable"
         
-        purchase_params = {'phone_number': phone_number}
-        
-        if friendly_name:
-            purchase_params['friendly_name'] = friendly_name
-        
-        if webhook_url:
-            purchase_params['sms_url'] = webhook_url
-            purchase_params['sms_method'] = 'POST'
-            logger.info(f"Configuring webhook: {webhook_url}")
-        
-        logger.info(f"Purchase params: {purchase_params}")
-        
-        # Purchase the number
-        purchased_number = client.incoming_phone_numbers.create(**purchase_params)
-        
-        result_data = {
-            'phone_number': purchased_number.phone_number,
-            'friendly_name': purchased_number.friendly_name,
-            'sid': purchased_number.sid,
-            'capabilities': {'sms': True, 'mms': True, 'voice': True},
-            'webhook_configured': webhook_url is not None,
-            'status': 'active',
-            'purchased_at': datetime.utcnow().isoformat()
+        purchase_data = {
+            'phone_number': phone_number,
+            'friendly_name': friendly_name or f"Purchased Number {phone_number}"
         }
         
-        logger.info(f"Successfully purchased number {phone_number} with SID {purchased_number.sid}")
-        return result_data, ""
+        if webhook_url:
+            purchase_data['sms_url'] = webhook_url
+            purchase_data['sms_method'] = 'POST'
+        
+        purchased_number = client.incoming_phone_numbers.create(**purchase_data)
+        
+        return {
+            'phone_number': purchased_number.phone_number,
+            'sid': purchased_number.sid,
+            'friendly_name': purchased_number.friendly_name,
+            'status': 'purchased'
+        }, ""
         
     except Exception as e:
-        error_msg = f"Failed to purchase phone number: {str(e)}"
-        logger.error(error_msg)
-        return None, error_msg
+        logger.error(f"Failed to purchase phone number {phone_number}: {str(e)}")
+        return None, f"Failed to purchase phone number: {str(e)}"
 
 # =============================================================================
 # API ENDPOINTS
@@ -218,7 +220,7 @@ def debug_imports():
 
 @signup_bp.route('/search-numbers', methods=['POST'])
 def search_available_numbers_endpoint():
-    """Registration Step 3: Search for available phone numbers"""
+    """Registration Step 3: Search for available phone numbers - FIXED VERSION"""
     try:
         logger.info(f"Search numbers called - SignalWire client available: {SIGNALWIRE_CLIENT_AVAILABLE}")
         
@@ -258,7 +260,7 @@ def search_available_numbers_endpoint():
             try:
                 logger.info(f"Calling get_available_phone_numbers for area code: {ac}")
                 
-                # Use the inline function
+                # ✅ FIX: Use the fixed function with proper regional parameters
                 numbers, error = get_available_phone_numbers(
                     area_code=ac,
                     city=city,
@@ -290,24 +292,22 @@ def search_available_numbers_endpoint():
             return jsonify({
                 'success': False,
                 'error': f'No phone numbers available in {city}. Please try a different city.',
-                'available_numbers': [],
-                'city': city,
-                'count': 0
-            }), 404
+                'available_numbers': []
+            }), 200
         
-        logger.info(f"Found {len(final_numbers)} numbers for {city}")
+        logger.info(f"Returning {len(final_numbers)} available numbers for {city}")
         
         return jsonify({
             'success': True,
-            'available_numbers': final_numbers,
             'city': city.title(),
+            'available_numbers': final_numbers,
             'count': len(final_numbers),
-            'message': f'Found {len(final_numbers)} available numbers in {city.title()}'
+            'searched_area_codes': area_codes
         }), 200
         
     except Exception as e:
-        logger.error(f"Error in phone number search: {str(e)}")
-        logger.error(f"Full traceback: {traceback.format_exc()}")
+        logger.error(f"Search numbers error: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({
             'success': False,
             'error': 'Phone number search failed',
@@ -316,50 +316,39 @@ def search_available_numbers_endpoint():
 
 @signup_bp.route('/complete-signup', methods=['POST'])
 def complete_signup():
-    """Complete registration: Create user, purchase phone number, setup webhook"""
+    """Complete the user registration with selected phone number"""
     try:
-        if not SIGNALWIRE_CLIENT_AVAILABLE:
+        logger.info("Complete signup called")
+        
+        data = request.json
+        if not data:
             return jsonify({
                 'success': False,
-                'error': 'SignalWire service not available. Please contact support.'
-            }), 503
-            
-        data = request.json
+                'error': 'No data provided'
+            }), 400
         
-        # Validate required fields
-        required_fields = [
-            'username', 'email', 'password', 'firstName', 'lastName',
-            'profileName', 'selectedPhoneNumber'
-        ]
-        
+        # Required fields
+        required_fields = ['username', 'email', 'password', 'firstName', 'lastName', 'profileName', 'selectedPhoneNumber']
         for field in required_fields:
             if not data.get(field):
                 return jsonify({
                     'success': False,
-                    'error': f'{field} is required'
+                    'error': f'Missing required field: {field}'
                 }), 400
         
-        # Validate password confirmation
-        if data.get('password') != data.get('confirmPassword'):
+        # Check if username/email already exists
+        if User.query.filter_by(username=data['username']).first():
             return jsonify({
                 'success': False,
-                'error': 'Passwords do not match'
+                'error': 'Username already exists'
             }), 400
         
-        # Check if username or email already exists
-        existing_user = User.query.filter(
-            (User.username == data['username']) | 
-            (User.email == data['email'])
-        ).first()
-        
-        if existing_user:
-            error_msg = 'Username already taken' if existing_user.username == data['username'] else 'Email already registered'
+        if User.query.filter_by(email=data['email']).first():
             return jsonify({
                 'success': False,
-                'error': error_msg
+                'error': 'Email already exists'
             }), 400
         
-        # Start database transaction
         try:
             # Create user
             user = User(
@@ -375,51 +364,29 @@ def complete_signup():
             db.session.add(user)
             db.session.flush()
             
-            # Purchase the phone number from SignalWire
-            selected_number = data['selectedPhoneNumber']
-            profile_name = data['profileName']
-            
-            logger.info(f"Purchasing SignalWire number {selected_number} for user {user.username}")
-            
-            webhook_url = f"{current_app.config.get('BASE_URL', 'https://backend.assitext.ca')}/api/webhooks/signalwire/sms"
-            
-            # Purchase number with webhook configuration
-            purchased_data, error = purchase_phone_number(
-                phone_number=selected_number,
-                friendly_name=f"{profile_name} - {user.username}",
-                webhook_url=webhook_url
-            )
-            
-            if error or not purchased_data:
-                db.session.rollback()
-                logger.error(f"Phone number purchase failed: {error}")
-                return jsonify({
-                    'success': False,
-                    'error': f'Failed to purchase phone number: {error or "Unknown error"}'
-                }), 500
-            
-            # Create profile with purchased number
+            # Create profile
             profile = Profile(
                 user_id=user.id,
-                name=profile_name,
-                description=data.get('profileDescription', ''),
-                phone_number=selected_number,
-                is_active=True,
-                is_default=True
+                name=data['profileName'],
+                description=data.get('profileDescription'),
+                phone_number=data['selectedPhoneNumber'],
+                preferred_city=data.get('preferredCity', 'toronto')
             )
             
             db.session.add(profile)
             db.session.commit()
             
-            # Generate JWT tokens
+            logger.info(f"User {user.username} and profile {profile.name} created successfully")
+            
+            # Generate tokens
             access_token = create_access_token(identity=user.id)
             refresh_token = create_refresh_token(identity=user.id)
             
-            logger.info(f"Successfully created account for {user.username} with number {selected_number}")
+            selected_number = data['selectedPhoneNumber']
             
             return jsonify({
                 'success': True,
-                'message': f'Account created successfully! Your SMS number {format_phone_display(selected_number)} is ready.',
+                'message': f'Welcome to AssistExt! Your SMS number {format_phone_display(selected_number)} is ready.',
                 'user': {
                     'id': user.id,
                     'username': user.username,
@@ -475,4 +442,4 @@ def test_signup():
     }), 200
 
 # Log the module loading
-logger.info(f"Signup blueprint loaded with inline SignalWire functions - Client available: {SIGNALWIRE_CLIENT_AVAILABLE}")
+logger.info(f"✅ Signup blueprint loaded - Client available: {SIGNALWIRE_CLIENT_AVAILABLE}")

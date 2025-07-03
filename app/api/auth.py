@@ -77,8 +77,13 @@ class RegistrationAPI(Resource):
 
 class PhoneNumberSearchAPI(Resource):
       
-   def search_phone_numbers(self, city: str, country: str = 'CA', limit: int = 10):
-   
+  """
+Fixed Phone Number Search Method in app/api/auth.py
+This is the method that needs to be updated in your existing auth.py file
+"""
+
+def search_phone_numbers(self, city: str, country: str = 'CA', limit: int = 10) -> Tuple[Dict, int]:
+    """Search for available phone numbers with proper regional parameters - FIXED VERSION"""
     
     if not city:
         return {
@@ -114,33 +119,38 @@ class PhoneNumberSearchAPI(Resource):
                 'quebec_city': ['418', '581'],
                 'halifax': ['902', '782'],
                 'saskatoon': ['306', '639'],
-                'regina': ['306', '639']
+                'regina': ['306', '639'],
+                'burlington': ['905', '289'],
+                'niagara': ['905', '289'],
+                'st_johns': ['709']
             }
             area_codes_to_search = city_area_codes.get(city, ['416'])  # Default to Toronto
         
         all_available_numbers = []
         
-       
+        # ✅ FIX: Get province for the city
         province = self._get_province_for_city(city)
         
-      
+        # Search across multiple area codes
         for code in area_codes_to_search:
             try:
                 logger.info(f"Searching area code {code} in country {country} with region {province}")
                 
-                
+                # ✅ FIX: Include region parameter for Canadian searches
                 search_params = {
                     'area_code': code,
                     'sms_enabled': True,
                     'limit': limit
                 }
                 
-             
+                # Add regional parameters for Canadian numbers
                 if country.upper() == 'CA':
                     search_params['in_region'] = province
                     search_params['in_locality'] = city.title()
                 
+                logger.info(f"Search params: {search_params}")
                 
+                # ✅ FIX: Use .local.list() for proper endpoint
                 available_numbers = client.available_phone_numbers(country).local.list(**search_params)
                 
                 # Format the response
@@ -206,6 +216,29 @@ class PhoneNumberSearchAPI(Resource):
             'details': str(e),
             'success': False
         }, 500
+
+def _get_province_for_city(self, city: str) -> str:
+    city_to_province = {
+        'toronto': 'ON',
+        'ottawa': 'ON',
+        'mississauga': 'ON',
+        'london': 'ON',
+        'hamilton': 'ON',
+        'burlington': 'ON',
+        'niagara': 'ON',
+        'montreal': 'QC',
+        'quebec_city': 'QC',
+        'vancouver': 'BC',
+        'calgary': 'AB',
+        'edmonton': 'AB',
+        'winnipeg': 'MB',
+        'halifax': 'NS',
+        'saskatoon': 'SK',
+        'regina': 'SK',
+        'st_johns': 'NL'
+    }
+    return city_to_province.get(city.lower(), 'ON')
+
 
 
 # Additional endpoint for number validation
