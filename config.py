@@ -38,3 +38,10 @@ class ProductionConfig(Config):
     MAIL_USERNAME = os.environ.get('MAIL_USERNAME')
     MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD')
     MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@assistext.ca')
+
+export default config_map = {
+	'development':DevelopmentConfig,
+	'production':ProductionConfig,
+	'testing':TestingConfig,
+	'default':ProductionConfig
+}
