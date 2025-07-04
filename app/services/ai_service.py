@@ -1,128 +1,225 @@
-
-import requests
-from flask import current_app
-from app.models.ai_model_settings import AIModelSettings
-from app.models.message import Message
-from app.models.text_example import TextExample
+from app.models.user import User
 from app.models.client import Client
+from app.models.message import Message
+from app.utils.signalwire_helpers import send_sms
+from typing import Dict, Any, Optional
+from app.extensions import db
+import time
+from datetime import datetime
 
-def generate_ai_response(profile, incoming_message, sender_number):
-    """Generate AI response using self-hosted LLM instead of OpenAI"""
-    # Get AI settings for the profile
-    ai_settings = profile.ai_settings
-    if not ai_settings:
-        # Use default settings if not set
-        ai_settings = AIModelSettings(
-            profile_id=profile.id,
-            model_version=current_app.config['LLM_MODEL'],
-            temperature=0.7,
-            response_length=150
-        )
+class AIService:
+    """Service for handling AI-powered message responses"""
     
-    # Get recent conversation history (using your existing method)
-    conversation = get_conversation_history(profile.id, sender_number)
-    
-    # Get client information (using your existing method)
-    client = Client.query.filter_by(phone_number=sender_number).first()
-    
-    # Get examples of profile's texting style (using your existing method)
-    examples = TextExample.query.filter_by(profile_id=profile.id).order_by(TextExample.timestamp).limit(20).all()
-    
-    # Create system prompt (using your existing method)
-    system_prompt = create_system_prompt(profile, client, examples)
-    
-    # Prepare conversation for LLM
-    messages = [
-        {"role": "system", "content": system_prompt}
-    ]
-    
-    # Add conversation history
-    for msg in conversation:
-        role = "user" if msg.is_incoming else "assistant"
-        messages.append({"role": role, "content": msg.content})
-    
-    # Add current message
-    messages.append({"role": "user", "content": incoming_message})
-    
-    # Call LLM API
-    try:
-        response = requests.post(
-            f"{current_app.config['LLM_BASE_URL']}/chat",
-            json={
-                "model": current_app.config['LLM_MODEL'],
-                "messages": messages,
-                "stream": False,
-                "options": {
-                    "temperature": ai_settings.temperature,
-                    "num_predict": ai_settings.response_length
-                }
-            },
-            timeout=10  # Add timeout to prevent hanging
-        )
+    @staticmethod
+    def process_incoming_message(from_number: str, to_number: str, content: str) -> Dict[str, Any]:
+        """
+        Process an incoming SMS and generate AI response based on user's settings
         
-        # Check if request was successful
-        if response.status_code == 200:
-            result = response.json()
-            generated_text = result["message"]["content"]
-            return generated_text
-        else:
-            current_app.logger.error(f"LLM API error: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        current_app.logger.error(f"Error generating LLM response: {e}")
-        return None
-
-
-def get_conversation_history(profile_id, client_phone, limit=10):
-    """Get recent conversation history between profile and client"""
-    messages = Message.query.filter(
-        Message.profile_id == profile_id,
-        Message.sender_number == client_phone
-    ).order_by(Message.timestamp.desc()).limit(limit).all()
+        Args:
+            from_number: Client's phone number
+            to_number: User's SignalWire phone number  
+            content: Message content
+            
+        Returns:
+            Dict with processing results
+        """
+        try:
+            # Find the user by their SignalWire phone number
+            user = User.query.filter_by(signalwire_phone_number=to_number).first()
+            
+            if not user:
+                return {
+                    'success': False,
+                    'error': 'No user found for this phone number',
+                    'user_found': False
+                }
+            
+            # Check if user has AI enabled
+            if not user.ai_enabled:
+                return {
+                    'success': False,
+                    'error': 'AI responses disabled for this user',
+                    'user_found': True,
+                    'ai_enabled': False
+                }
+            
+            # Find or create client
+            client = Client.query.filter_by(
+                user_id=user.id,
+                phone_number=from_number
+            ).first()
+            
+            if not client:
+                client = Client(
+                    user_id=user.id,
+                    phone_number=from_number,
+                    first_contact=datetime.utcnow(),
+                    last_interaction=datetime.utcnow()
+                )
+                db.session.add(client)
+                db.session.flush()  # Get the client ID
+            else:
+                client.update_interaction()
+            
+            # Check if client is blocked
+            if client.is_blocked:
+                return {
+                    'success': False,
+                    'error': 'Client is blocked',
+                    'user_found': True,
+                    'client_blocked': True
+                }
+            
+            # Save incoming message
+            incoming_message = Message(
+                user_id=user.id,
+                client_id=client.id,
+                content=content,
+                direction='incoming',
+                from_number=from_number,
+                to_number=to_number,
+                status='delivered'
+            )
+            db.session.add(incoming_message)
+            
+            # Check daily message limit
+            user.reset_monthly_count_if_needed()
+            if user.monthly_message_count >= (user.daily_message_limit * 30):
+                return {
+                    'success': False,
+                    'error': 'Daily message limit exceeded',
+                    'user_found': True,
+                    'limit_exceeded': True
+                }
+            
+            # Generate AI response
+            ai_response = AIService._generate_ai_response(user, client, content)
+            
+            if not ai_response['success']:
+                return ai_response
+            
+            # Send the response via SignalWire
+            send_result = send_sms(
+                to=from_number,
+                message=ai_response['response'],
+                from_number=to_number
+            )
+            
+            if send_result['success']:
+                # Save outgoing message
+                outgoing_message = Message(
+                    user_id=user.id,
+                    client_id=client.id,
+                    content=ai_response['response'],
+                    direction='outgoing',
+                    from_number=to_number,
+                    to_number=from_number,
+                    was_ai_generated=True,
+                    ai_model_used=user.ai_model,
+                    ai_processing_time=ai_response.get('processing_time', 0),
+                    ai_confidence=ai_response.get('confidence', 0.8),
+                    status='delivered',
+                    signalwire_sid=send_result.get('sid')
+                )
+                db.session.add(outgoing_message)
+                
+                # Update usage counters
+                user.update_message_count(sent=1, received=1)
+                
+                db.session.commit()
+                
+                return {
+                    'success': True,
+                    'message': 'AI response sent successfully',
+                    'response_content': ai_response['response'],
+                    'user_id': user.id,
+                    'client_id': client.id
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': f"Failed to send SMS: {send_result['error']}",
+                    'user_found': True,
+                    'sms_failed': True
+                }
+                
+        except Exception as e:
+            db.session.rollback()
+            return {
+                'success': False,
+                'error': f"Processing error: {str(e)}",
+                'exception': True
+            }
     
-    # Reverse to get chronological order
-    return messages[::-1]
-
-def create_system_prompt(profile, client, examples):
-    """Create system prompt for AI response generation"""
-    # Basic information about the profile
-    prompt = f"""
-    You are responding as {profile.name}, an escort. Mimic their texting style based on the examples provided.
-    
-    IMPORTANT GUIDELINES:
-    1. Keep your responses brief and natural like text messages (1-3 sentences max)
-    2. NEVER mention explicit services or prices
-    3. If asked about location or meeting details, suggest continuing the conversation but don't make specific commitments
-    4. Do not mention that you're an AI - respond as if you're the actual person
-    5. If messages contain suspicious content, be vague or change the subject
-    6. Be seductive, flirty, short and consise.
-    7. Use one or two emojis.
-    
-    """
-    
-    # Add client-specific information
-    if client:
-        prompt += f"\nClient information:"
-        if client.name:
-            prompt += f"\n- Name: {client.name}"
-        if client.notes:
-            prompt += f"\n- Notes: {client.notes}"
-        if client.is_regular:
-            prompt += f"\n- This is a regular client. Be more familiar and friendly."
-    
-    # Add custom instructions from AI settings
-    if profile.ai_settings and profile.ai_settings.custom_instructions:
-        prompt += f"\n\nCustom instructions:\n{profile.ai_settings.custom_instructions}"
-    
-    # Add style notes
-    if profile.ai_settings and profile.ai_settings.style_notes:
-        prompt += f"\n\nWriting style notes:\n{profile.ai_settings.style_notes}"
-    
-    # Add examples of writing style
-    if examples:
-        prompt += "\n\nExamples of my texting style:"
-        for ex in examples:
-            sender = "Client" if ex.is_incoming else "Me"
-            prompt += f"\n{sender}: {ex.content}"
-    
-    return prompt
+    @staticmethod
+    def _generate_ai_response(user: User, client: Client, message_content: str) -> Dict[str, Any]:
+        """Generate AI response using user's settings"""
+        try:
+            start_time = time.time()
+            
+            # Get AI settings for this user
+            ai_settings = user.get_ai_settings()
+            
+            # Use client-specific personality if available
+            personality = client.get_ai_personality()
+            
+            # Get recent conversation context
+            recent_messages = Message.query.filter_by(
+                user_id=user.id,
+                client_id=client.id
+            ).order_by(Message.created_at.desc()).limit(10).all()
+            
+            # Build conversation context
+            context_messages = []
+            for msg in reversed(recent_messages):
+                role = "user" if msg.direction == "incoming" else "assistant"
+                context_messages.append({
+                    "role": role,
+                    "content": msg.content
+                })
+            
+            # Add the current message
+            context_messages.append({
+                "role": "user",
+                "content": message_content
+            })
+            
+            # Create system prompt
+            system_prompt = f"""
+            {personality}
+            
+            Additional instructions: {ai_settings['instructions']}
+            
+            You are responding to messages from a client named {client.get_display_name()}.
+            Client status: {client.relationship_status}
+            
+            Keep responses concise and appropriate for SMS. Respond naturally and helpfully.
+            """
+            
+            # Call OpenAI API
+            response = openai.ChatCompletion.create(
+                model=ai_settings['model'],
+                messages=[
+                    {"role": "system", "content": system_prompt.strip()},
+                    *context_messages
+                ],
+                temperature=ai_settings['temperature'],
+                max_tokens=ai_settings['max_tokens']
+            )
+            
+            ai_response = response.choices[0].message.content.strip()
+            processing_time = time.time() - start_time
+            
+            return {
+                'success': True,
+                'response': ai_response,
+                'processing_time': processing_time,
+                'confidence': 0.8,  # Could be calculated based on response quality
+                'model_used': ai_settings['model']
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f"AI generation failed: {str(e)}"
+            }
