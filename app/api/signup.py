@@ -6,7 +6,7 @@ Fixed version with proper regional parameters for Canadian searches
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import create_access_token, create_refresh_token
 from app.models.user import User
-from app.models.profile import Profile
+#from app.models.profile import Profile # Removed - using User model now
 from app.extensions import db
 from typing import Tuple, List, Dict, Optional
 import logging
