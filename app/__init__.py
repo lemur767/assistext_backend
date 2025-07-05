@@ -2,7 +2,6 @@
 from flask import Flask
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
-from flask_socketio import SocketIO
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 import logging
@@ -26,8 +25,7 @@ def create_app(config_name=os.environ.get('$FLASK_ENV')):
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
-    socketio.init_app(app, cors_allowed_origins="*")
-    
+        
     # Initialize Celery (if needed)
     try:
         celery.conf.update(app.config)
