@@ -1,12 +1,12 @@
 import click
-from flask.cli import with_appcontext
-from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
-from app.services.signalwire_service import (
-from app.utils.signalwire_helpers import get_signalwire_client, send_sms, get_signalwire_phone_numbers, get_available_phone_numbers, purchase_phone_number, configure_number_webhook, validate_signalwire_webhook_request, format_phone_display
+from signalwire_service import ( 
     initialize_signalwire_integration, 
-    verify_signalwire_integration,
-    get_signalwire_dashboard_data
+    verify_signalwire_integration, 
+    get_signalwire_dashboard_data, 
+    get_signalwire_phone_numbers, 
+    send_signalwire_sms 
 )
+
 
 @click.command()
 @with_appcontext

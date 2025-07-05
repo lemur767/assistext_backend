@@ -4,8 +4,8 @@ import os
 
 
 
-env = os.environ.get('FLASK_ENV', 'production')
-config_class = config_map.get(env, config_map['default'])
+
+config_class = config_map.get(config_map['default'])
 
 application = create_app(config_class)
 

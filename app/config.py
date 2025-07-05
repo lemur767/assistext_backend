@@ -9,7 +9,7 @@ class Config:
     """Base configuration"""
     # Flask settings
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'GwlofZJDR5sIAVuaVLefTBBHhBYEIrwW'
-    
+    SQLALCHEMY_DATABASE_URI='postgresql://app_user:Assistext2025Secure@localhost/assistext_prod'
     # Database
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
@@ -78,8 +78,7 @@ class TestingConfig(Config):
 class ProductionConfig(Config):
     """Production configuration"""
     DEBUG = False
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
-        'postgresql://app_user:AssisText2025SecureDB@localhost:5432/assistext_prod'
+    SQLALCHEMY_DATABASE_URI ='postgresql://app_user:AssisText2025SecureDB@localhost:5432/assistext_prod'
     # Flask settings
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'GwlofZJDR5sIAVuaVLefTBBHhBYEIrwW'
     
@@ -134,5 +133,5 @@ config_map = {
     'development': DevelopmentConfig,
     'testing': TestingConfig,
     'production': ProductionConfig,
-    'default': DevelopmentConfig
+    'default': ProductionConfig
 }
