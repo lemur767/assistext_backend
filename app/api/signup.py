@@ -363,20 +363,10 @@ def complete_signup():
             
             db.session.add(user)
             db.session.flush()
+                  
+           
             
-            # Create profile
-            profile = Profile(
-                user_id=user.id,
-                name=data['profileName'],
-                description=data.get('profileDescription'),
-                phone_number=data['selectedPhoneNumber'],
-                preferred_city=data.get('preferredCity', 'toronto')
-            )
-            
-            db.session.add(profile)
-            db.session.commit()
-            
-            logger.info(f"User {user.username} and profile {profile.name} created successfully")
+            logger.info(f"User {user.username} created successfully")
             
             # Generate tokens
             access_token = create_access_token(identity=user.id)
@@ -394,11 +384,7 @@ def complete_signup():
                     'first_name': user.first_name,
                     'last_name': user.last_name
                 },
-                'profile': {
-                    'id': profile.id,
-                    'name': profile.name,
-                    'phone_number': profile.phone_number
-                },
+                
                 'access_token': access_token,
                 'refresh_token': refresh_token
             }), 201

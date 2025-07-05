@@ -8,10 +8,8 @@ from flask import Blueprint
 # List of all available blueprints with their URL prefixes
 BLUEPRINT_CONFIGS = [
     ('auth', '/api/auth'),
-    ('profiles', '/api/profiles'),
     ('messages', '/api/messages'),
     ('webhooks', '/api/webhooks'),
-    ('clients', '/api/clients'),
     ('billing', '/api/billing'),
     ('text_examples', '/api/text_examples'),
     ('ai_settings', '/api/ai_settings'),
@@ -22,16 +20,13 @@ def get_blueprint_by_name(name):
     """Get a blueprint by its name using lazy import."""
     blueprint_map = {
         'auth': lambda: __import__('app.api.auth', fromlist=['auth_bp']).auth_bp,
-        'profiles': lambda: __import__('app.api.profiles', fromlist=['profiles_bp']).profiles_bp,
         'messages': lambda: __import__('app.api.messages', fromlist=['messages_bp']).messages_bp,
         'webhooks': lambda: __import__('app.api.webhooks', fromlist=['webhooks_bp']).webhooks_bp,
-        'clients': lambda: __import__('app.api.client', fromlist=['clients_bp']).clients_bp,
         'billing': lambda: __import__('app.api.billing', fromlist=['billing_bp']).billing_bp,
         'text_examples': lambda: __import__('app.api.text_examples', fromlist=['text_examples_bp']).text_examples_bp,
         'ai_settings': lambda: __import__('app.api.ai_settings', fromlist=['ai_settings_bp']).ai_settings_bp,
-        'twilio': lambda: __import__('app.api.twilio', fromlist=['twilio_bp']).twilio_bp,
+        'signalwire': lambda: __import__('app.api.signalwire', fromlist=['signalwire_bp']).signalwire_bp
     }
-    
     if name in blueprint_map:
         return blueprint_map[name]()
     return None

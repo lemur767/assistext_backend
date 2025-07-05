@@ -67,73 +67,7 @@ def get_current_subscription():
     
     return jsonify(response_data), 200
 
-@subscription_bp.route('/phone-numbers', methods=['GET'])
-@jwt_required()
-def get_phone_numbers():
-    """Get available phone numbers for user"""
-    user_id = get_jwt_identity()
-    
-    # Get user's SignalWire account
-    signalwire_account = SignalWireAccount.query.join(Subscription).filter(
-        Subscription.user_id == user_id,
-        Subscription.status == 'active',
-        SignalWireAccount.is_active == True
-    ).first()
-    
-    if not signalwire_account:
-        return jsonify({'error': 'No active SignalWire account found'}), 404
-    
-    phone_numbers = [phone.to_dict() for phone in signalwire_account.phone_numbers]
-    
-    return jsonify({
-        'phone_numbers': phone_numbers,
-        'account_info': {
-            'monthly_limit': signalwire_account.monthly_limit,
-            'current_usage': signalwire_account.current_usage
-        }
-    }), 200
 
-@subscription_bp.route('/assign-number', methods=['POST'])
-@jwt_required()
-def assign_phone_number():
-    """Assign phone number to a profile"""
-    user_id = get_jwt_identity()
-    data = request.json
-    
-    required_fields = ['phone_number_id', 'profile_id']
-    if not all(field in data for field in required_fields):
-        return jsonify({'error': 'Missing required fields'}), 400
-    
-    # Get user's SignalWire account
-    signalwire_account = SignalWireAccount.query.join(Subscription).filter(
-        Subscription.user_id == user_id,
-        Subscription.status == 'active'
-    ).first()
-    
-    if not signalwire_account:
-        return jsonify({'error': 'No active SignalWire account found'}), 404
-    
-    # Get phone number
-    phone_number = signalwire_account.phone_numbers.filter_by(
-        id=data['phone_number_id'],
-        is_active=True,
-        is_assigned=False
-    ).first()
-    
-    if not phone_number:
-        return jsonify({'error': 'Phone number not available'}), 404
-    
-    # Assign to profile
-    phone_number.profile_id = data['profile_id']
-    phone_number.is_assigned = True
-    phone_number.assigned_at = datetime.utcnow()
-    
-    db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'phone_number': phone_number.to_dict()
-    }), 200
 
 @subscription_bp.route('/cancel', methods=['POST'])
 @jwt_required()
