@@ -1,204 +1,215 @@
 """
-Updated Flask Extensions with Celery Export
-app/extensions.py - Complete extension initialization for AssisText
+Fixed Extensions with SocketIO Issue Resolution
+app/extensions.py - Resolves SocketIO import conflicts
 """
 import os
+import logging
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
-from flask_socketio import SocketIO
 from flask_mail import Mail
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from celery import Celery
-import redis
-import logging
 
-# Initialize extensions without app - EXPORTED FOR IMPORTS
+# Initialize core extensions that always work
 db = SQLAlchemy()
 migrate = Migrate()
 jwt = JWTManager()
-socketio = SocketIO()
 mail = Mail()
 
-# Initialize rate limiter - EXPORTED FOR IMPORTS  
+# Initialize rate limiter
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=["1000 per day", "100 per hour"]
 )
 
-# Initialize Redis connection - EXPORTED FOR IMPORTS
-redis_client = None
+# Initialize SocketIO with error handling
+socketio = None
+try:
+    from flask_socketio import SocketIO
+    socketio = SocketIO()
+    logging.info("SocketIO imported successfully")
+except ImportError as e:
+    logging.warning(f"SocketIO import failed: {e}. Continuing without SocketIO.")
+    socketio = None
+except Exception as e:
+    logging.warning(f"SocketIO initialization failed: {e}. Continuing without SocketIO.")
+    socketio = None
 
-# Initialize Celery - EXPORTED FOR IMPORTS
+# Initialize Redis and Celery
+redis_client = None
 celery = None
 
 def make_celery(app=None):
     """
-    Create and configure Celery instance
-    
-    Args:
-        app: Flask application instance
-    
-    Returns:
-        Configured Celery instance
+    Create and configure Celery instance with error handling
     """
     global celery
     
-    broker_url = os.getenv('CELERY_BROKER_URL', 'redis://AssisText2025!Redis:@172.234.219.10:6379/0')
-    result_backend = os.getenv('CELERY_RESULT_BACKEND', 'redis://AssisText2025!Redis:@172.234.219.10:6379/0')
-    
-    # Create or update global celery instance
-    if celery is None:
-        celery = Celery(
-            'assistext',
-            broker=broker_url,
-            backend=result_backend,
-            include=['app.tasks']  # Include tasks module
-        )
-    
-    # Configure Celery
-    celery.conf.update(
-        # Task settings
-        task_serializer='json',
-        accept_content=['json'],
-        result_serializer='json',
-        timezone='America/Toronto',
-        enable_utc=True,
+    try:
+        from celery import Celery
         
-        # Worker settings
-        worker_prefetch_multiplier=1,
-        task_acks_late=True,
-        worker_max_tasks_per_child=1000,
+        broker_url = os.getenv('CELERY_BROKER_URL', 'redis://AssisText2025!Redis:@172.234.219.10:6379/0')
+        result_backend = os.getenv('CELERY_RESULT_BACKEND', 'redis://AssisText2025!Redis:@172.234.219.10:6379/0')
         
-        # Result settings
-        result_expires=3600,  # 1 hour
+        if celery is None:
+            celery = Celery(
+                'assistext',
+                broker=broker_url,
+                backend=result_backend,
+                include=['app.tasks']
+            )
         
-        # Routing
-        task_routes={
-            'app.tasks.process_incoming_sms': {'queue': 'sms_processing'},
-            'app.tasks.generate_ai_response': {'queue': 'ai_processing'},
-            'app.tasks.send_sms_message': {'queue': 'sms_sending'},
-            'app.tasks.update_message_status': {'queue': 'status_updates'},
-        },
-        
-        # Queue settings
-        task_default_queue='default',
-        task_default_exchange='default',
-        task_default_routing_key='default',
-        
-        # Retry settings
-        task_reject_on_worker_lost=True,
-        task_ignore_result=False,
-        
-        # Beat schedule (if using celery beat)
-        beat_schedule={
-            'cleanup-old-messages': {
-                'task': 'app.tasks.cleanup_old_messages',
-                'schedule': 3600.0,  # Every hour
+        # Configure Celery
+        celery.conf.update(
+            task_serializer='json',
+            accept_content=['json'],
+            result_serializer='json',
+            timezone='America/Toronto',
+            enable_utc=True,
+            worker_prefetch_multiplier=1,
+            task_acks_late=True,
+            worker_max_tasks_per_child=1000,
+            result_expires=3600,
+            task_routes={
+                'app.tasks.process_incoming_sms': {'queue': 'sms_processing'},
+                'app.tasks.generate_ai_response': {'queue': 'ai_processing'},
+                'app.tasks.send_sms_message': {'queue': 'sms_sending'},
+                'app.tasks.update_message_status': {'queue': 'status_updates'},
             },
-            'health-check': {
-                'task': 'app.tasks.health_check',
-                'schedule': 300.0,  # Every 5 minutes
+            task_default_queue='default',
+            task_default_exchange='default',
+            task_default_routing_key='default',
+            task_reject_on_worker_lost=True,
+            task_ignore_result=False,
+            beat_schedule={
+                'cleanup-old-messages': {
+                    'task': 'app.tasks.cleanup_old_messages',
+                    'schedule': 3600.0,
+                },
+                'health-check': {
+                    'task': 'app.tasks.health_check',
+                    'schedule': 300.0,
+                }
             }
-        }
-    )
-    
-    # Configure Flask integration if app provided
-    if app:
-        class ContextTask(celery.Task):
-            """Make celery tasks work with Flask app context"""
-            def __call__(self, *args, **kwargs):
-                with app.app_context():
-                    return self.run(*args, **kwargs)
+        )
         
-        celery.Task = ContextTask
+        # Configure Flask integration if app provided
+        if app:
+            class ContextTask(celery.Task):
+                def __call__(self, *args, **kwargs):
+                    with app.app_context():
+                        return self.run(*args, **kwargs)
+            
+            celery.Task = ContextTask
+            celery.conf.update(app.config)
         
-        # Update config from Flask app
-        celery.conf.update(app.config)
-    
-    return celery
+        return celery
+        
+    except ImportError as e:
+        logging.warning(f"Celery import failed: {e}. Continuing without Celery.")
+        return None
+    except Exception as e:
+        logging.warning(f"Celery initialization failed: {e}. Continuing without Celery.")
+        return None
 
 def init_redis():
-    """Initialize Redis connection"""
+    """Initialize Redis connection with error handling"""
     global redis_client
     try:
+        import redis
         redis_url = os.getenv('REDIS_URL', 'redis://AssisText2025!Redis:@172.234.219.10:6379/0')
         redis_client = redis.from_url(redis_url, decode_responses=True)
-        
-        # Test connection
         redis_client.ping()
         logging.info("Redis connection initialized successfully")
-        
         return redis_client
-        
+    except ImportError:
+        logging.warning("Redis library not available. Continuing without Redis.")
+        return None
     except Exception as e:
-        logging.error(f"Failed to initialize Redis: {str(e)}")
-        redis_client = None
+        logging.warning(f"Redis initialization failed: {e}. Continuing without Redis.")
         return None
 
 def init_extensions(app):
     """
     Initialize all Flask extensions with app
-    
-    Args:
-        app: Flask application instance
+    Includes error handling for optional extensions
     """
     global celery, redis_client
     
-    # Initialize database
-    db.init_app(app)
-    migrate.init_app(app, db)
+    # Initialize core extensions (these must work)
+    try:
+        db.init_app(app)
+        migrate.init_app(app, db)
+        jwt.init_app(app)
+        mail.init_app(app)
+        limiter.init_app(app)
+        logging.info("Core extensions initialized successfully")
+    except Exception as e:
+        logging.error(f"Core extension initialization failed: {e}")
+        raise  # These are critical, so raise the error
     
-    # Initialize JWT
-    jwt.init_app(app)
+    # Initialize SocketIO (optional)
+    if socketio is not None:
+        try:
+            socketio.init_app(
+                app,
+                cors_allowed_origins=["https://assitext.ca", "https://www.assitext.ca"],
+                async_mode='threading'
+            )
+            logging.info("SocketIO initialized successfully")
+        except Exception as e:
+            logging.warning(f"SocketIO initialization failed: {e}. Continuing without real-time features.")
+    else:
+        logging.warning("SocketIO not available. Real-time features disabled.")
     
-    # Initialize SocketIO
-    socketio.init_app(
-        app,
-        cors_allowed_origins=["https://assitext.ca", "https://www.assitext.ca"],
-        async_mode='threading'
-    )
+    # Initialize Redis (optional)
+    try:
+        redis_client = init_redis()
+        if redis_client:
+            logging.info("Redis initialized successfully")
+    except Exception as e:
+        logging.warning(f"Redis initialization failed: {e}. Continuing without caching.")
     
-    # Initialize Mail
-    mail.init_app(app)
-    
-    # Initialize Rate Limiter
-    limiter.init_app(app)
-    
-    # Initialize Redis
-    redis_client = init_redis()
-    
-    # Initialize Celery and assign to global variable
-    celery = make_celery(app)
+    # Initialize Celery (optional)
+    try:
+        celery = make_celery(app)
+        if celery:
+            logging.info("Celery initialized successfully")
+    except Exception as e:
+        logging.warning(f"Celery initialization failed: {e}. Continuing without background tasks.")
     
     # Configure JWT error handlers
     configure_jwt_handlers(app)
     
-    logging.info("All extensions initialized successfully")
+    logging.info("Extension initialization completed")
 
 def configure_jwt_handlers(app):
     """Configure JWT error handlers"""
-    
-    @jwt.expired_token_loader
-    def expired_token_callback(jwt_header, jwt_payload):
-        return {'message': 'Token has expired', 'error': 'token_expired'}, 401
-    
-    @jwt.invalid_token_loader
-    def invalid_token_callback(error):
-        return {'message': 'Invalid token', 'error': 'invalid_token'}, 401
-    
-    @jwt.unauthorized_loader
-    def missing_token_callback(error):
-        return {'message': 'Authorization token is required', 'error': 'authorization_required'}, 401
-    
-    @jwt.needs_fresh_token_loader
-    def token_not_fresh_callback(jwt_header, jwt_payload):
-        return {'message': 'Fresh token required', 'error': 'fresh_token_required'}, 401
-    
-    @jwt.revoked_token_loader
-    def revoked_token_callback(jwt_header, jwt_payload):
-        return {'message': 'Token has been revoked', 'error': 'token_revoked'}, 401
+    try:
+        @jwt.expired_token_loader
+        def expired_token_callback(jwt_header, jwt_payload):
+            return {'message': 'Token has expired', 'error': 'token_expired'}, 401
+        
+        @jwt.invalid_token_loader
+        def invalid_token_callback(error):
+            return {'message': 'Invalid token', 'error': 'invalid_token'}, 401
+        
+        @jwt.unauthorized_loader
+        def missing_token_callback(error):
+            return {'message': 'Authorization token is required', 'error': 'authorization_required'}, 401
+        
+        @jwt.needs_fresh_token_loader
+        def token_not_fresh_callback(jwt_header, jwt_payload):
+            return {'message': 'Fresh token required', 'error': 'fresh_token_required'}, 401
+        
+        @jwt.revoked_token_loader
+        def revoked_token_callback(jwt_header, jwt_payload):
+            return {'message': 'Token has been revoked', 'error': 'token_revoked'}, 401
+            
+        logging.info("JWT error handlers configured")
+    except Exception as e:
+        logging.error(f"JWT handler configuration failed: {e}")
 
 def get_redis():
     """Get Redis client instance"""
@@ -214,13 +225,12 @@ def get_celery():
         celery = make_celery()
     return celery
 
-# Health check functions
 def check_redis_health():
     """Check Redis connection health"""
     try:
-        redis_client = get_redis()
-        if redis_client:
-            redis_client.ping()
+        client = get_redis()
+        if client:
+            client.ping()
             return True
         return False
     except Exception:
@@ -231,7 +241,6 @@ def check_celery_health():
     try:
         celery_app = get_celery()
         if celery_app:
-            # Check if workers are available
             inspect = celery_app.control.inspect()
             stats = inspect.stats()
             return bool(stats)
@@ -252,7 +261,6 @@ def get_extension_status():
     }
 
 # Initialize Celery at module level for worker processes
-# This ensures celery is available even before Flask app initialization
 if celery is None:
     try:
         celery = make_celery()
