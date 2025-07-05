@@ -7,30 +7,21 @@ from flask_migrate import Migrate
 import logging
 import os
 
-from app.config import Config
-from app.extensions import db, migrate, jwt, celery
+from app.config import config
+from app.extensions import init_extensions, db, jwt
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def create_app(config_name=os.environ.get('$FLASK_ENV')):
-    """Create and configure the Flask application"""
+def create_app(config_name='production'):
     app = Flask(__name__)
-    app.config.from_object(Config[config_name])
-    
+    app.config.from_object(config[config_name])
+     
     # Initialize extensions
-    CORS(app)
-    db.init_app(app)
-    migrate.init_app(app, db)
-    jwt.init_app(app)
-        
-    # Initialize Celery (if needed)
-    try:
-        celery.conf.update(app.config)
-    except Exception as e:
-        logger.warning(f"Celery initialization failed: {e}")
+    init_extensions(app)
+   
     
     # Register error handlers first
     register_error_handlers(app)
