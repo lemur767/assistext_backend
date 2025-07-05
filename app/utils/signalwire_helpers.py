@@ -211,7 +211,7 @@ def validate_signalwire_webhook_request(request_url: str, post_vars: dict, signa
         logger.error(f"Webhook signature validation failed: {str(e)}")
         return False
 
-def send_sms_message(from_number: str, to_number: str, message: str) -> Tuple[Optional[Dict], str]:
+def send_sms(from_number: str, to_number: str, message: str) -> Tuple[Optional[Dict], str]:
     """Send SMS message using SignalWire - FIXED VERSION"""
     try:
         client = get_signalwire_client()
