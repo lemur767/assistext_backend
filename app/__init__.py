@@ -8,7 +8,7 @@ import logging
 import os
 
 from app.config import Config
-from app.extensions import db, migrate, jwt, socketio, celery
+from app.extensions import db, migrate, jwt, celery
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
