@@ -12,8 +12,8 @@ class LLMService:
     
     def __init__(self):
         """Initialize LLM service with configuration."""
-        self.llm_endpoint = current_app.config.get('LLM_ENDPOINT', 'http://10.0.0.6:11434')
-        self.model_name = current_app.config.get('LLM_MODEL', 'dolphin3')
+        self.llm_endpoint = current_app.config.get('LLM_ENDPOINT', 'http://10.0.0.4:8080')
+        self.model_name = current_app.config.get('LLM_MODEL', 'dolphin-mistral:7b')
         self.timeout = current_app.config.get('LLM_TIMEOUT', 30)
         self.max_tokens = current_app.config.get('LLM_MAX_TOKENS', 150)
         

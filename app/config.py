@@ -10,7 +10,6 @@ class Config:
     # Flask settings
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'GwlofZJDR5sIAVuaVLefTBBHhBYEIrwW'
     SQLALCHEMY_DATABASE_URI='postgresql://app_user:Assistext2025Secure@localhost/assistext_prod'
-    # Database
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # JWT settings

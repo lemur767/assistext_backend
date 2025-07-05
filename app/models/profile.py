@@ -4,14 +4,15 @@ from datetime import datetime
 import json
 from typing import Dict, Any, Optional
 
-class User(db.Model):
-    __tablename__ = 'users'
+class Profile(db.Model):
+    __tablename__ = 'profile'
      
-    id = db.Column(db.Integer, primary_key=True)
+    profile_id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(100), unique=True, nullable=False)
     email = db.Column(db.String(255), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    
+    phone_number_sid = db.Column(db.String(34), nullable=True, index=True)
+    friendly_name = db.Column(db.String(100), nullable=True)
     # Basic Profile Information (moved from separate profile table)
     first_name = db.Column(db.String(100))
     last_name = db.Column(db.String(100))

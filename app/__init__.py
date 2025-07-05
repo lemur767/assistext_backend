@@ -6,8 +6,9 @@ from flask_socketio import SocketIO
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 import logging
+import os
 
-from app.config import config
+from app.config import Config
 from app.extensions import db, migrate, jwt, socketio, celery
 
 # Set up logging
@@ -15,10 +16,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def create_app(config_name='development'):
+def create_app(config_name=os.environ.get('$FLASK_ENV')):
     """Create and configure the Flask application"""
     app = Flask(__name__)
-    app.config.from_object(config[config_name])
+    app.config.from_object(Config[config_name])
     
     # Initialize extensions
     CORS(app)
@@ -80,7 +81,7 @@ def register_basic_routes(app):
     
     @app.route('/')
     def index():
-        return {'message': 'SMS AI Responder API', 'status': 'running'}, 200
+        return {'message': 'Backend Assistext', 'status': 'running'}, 200
     
     @app.route('/health')
     def health_check():
@@ -94,7 +95,7 @@ def register_basic_routes(app):
         
         return {
             'status': 'ok',
-            'message': 'SMS AI Responder API is running',
+            'message': 'Backend is running',
             'database': db_status,
             'version': '1.0.0'
         }, 200
@@ -128,11 +129,10 @@ def register_blueprints(app):
         logger.error(f"❌ Error registering auth blueprint: {e}")
         register_fallback_auth_routes(app)
     
-    # Comment out other blueprints until auth works
-    """
+    
     try:
-        from app.api.profiles import profiles_bp
-        app.register_blueprint(profiles_bp, url_prefix='/api/profiles')
+        from app.api.profile import profile_bp
+        app.register_blueprint(profile_bp, url_prefix='/api/profile')
         logger.info("✅ Profiles blueprint registered")
     except Exception as e:
         logger.warning(f"⚠️ Profiles blueprint not available: {e}")
@@ -143,7 +143,7 @@ def register_blueprints(app):
         logger.info("✅ Messages blueprint registered")
     except Exception as e:
         logger.warning(f"⚠️ Messages blueprint not available: {e}")
-    """
+    
 
 
 def register_fallback_auth_routes(app):
@@ -209,6 +209,6 @@ def register_error_handlers(app):
 
 # For development server
 if __name__ == '__main__':
-    app = create_app('development')
-    logger.info("Starting development server...")
+    app = create_app('production')
+    logger.info("Starting production server...")
     app.run(debug=True, host='0.0.0.0', port=5000)
