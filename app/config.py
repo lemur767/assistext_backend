@@ -1,4 +1,4 @@
-# app/config.py - Clean configuration file
+
 import os
 from datetime import timedelta
 from dotenv import load_dotenv
@@ -130,7 +130,7 @@ class ProductionConfig(Config):
 
 
 # Configuration dictionary
-config = {
+config_map = {
     'development': DevelopmentConfig,
     'testing': TestingConfig,
     'production': ProductionConfig,
