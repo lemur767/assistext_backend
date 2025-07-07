@@ -22,7 +22,7 @@ class UserRegistrationSchema(Schema):
     username = fields.Str(required=True, validate=validate.Length(min=3, max=80))
     email = fields.Email(required=True)
     password = fields.Str(required=True, validate=validate.Length(min=8))
-    confirm_password = fields.Str(required=True)
+    passwordConfirm = fields.Str(required=True)
     firstName = fields.Str(required=True, validate=validate.Length(min=1, max=50))
     lastName = fields.Str(required=True, validate=validate.Length(min=1, max=50))
     personal_phone = fields.Str(allow_none=True, validate=validate.Length(max=20))
