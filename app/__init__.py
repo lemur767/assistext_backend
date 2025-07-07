@@ -1,11 +1,9 @@
-"""
-Fixed Flask App Initialization
-app/__init__.py - Works with updated config and extensions
-"""
+
 import os
 import logging
 from flask import Flask, jsonify
 from flask_cors import CORS
+from flask_jwt_extended import JWTManager
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -59,7 +57,12 @@ def create_app(config_name=None):
     
     # Enable CORS
     CORS(app, 
-         origins=app.config.get('CORS_ORIGINS', ['https://assitext.ca', 'https://www.assitext.ca']),
+         origins=app.config.get('CORS_ORIGINS', [
+             'https://assitext.ca', 
+             'https://www.assitext.ca',
+             'http://localhost:3000',  # Development frontend
+             'http://127.0.0.1:3000'   # Alternative development
+         ]),
          supports_credentials=True)
     
     # Register basic routes
@@ -68,74 +71,46 @@ def create_app(config_name=None):
     # Register error handlers
     register_error_handlers(app)
     
-    # Register blueprints
-    register_blueprints(app)
+    # Register API blueprints (CONSOLIDATED - NO PROFILES)
+    register_api_blueprints(app)
     
-    # Create database tables if needed
-    with app.app_context():
-        setup_database(app)
+    # Set up database
+    setup_database(app)
     
-    logger.info(f"Flask app created successfully in {config_name} mode")
+    # Initialize JWT handlers
+    setup_jwt_handlers(app)
+    
+    logger.info("Flask app created successfully")
     return app
 
 def configure_app_fallback(app):
-    """Fallback configuration if config.py import fails"""
-    logger.warning("Using fallback configuration")
-    
+    """Fallback configuration if config.py is not available"""
     app.config.update({
-        'SECRET_KEY': os.environ.get('SECRET_KEY', 'fallback-secret-key'),
-        'SQLALCHEMY_DATABASE_URI': os.environ.get('DATABASE_URL', 
-            'postgresql://app_user:AssisText2025!SecureDB@172.234.219.10:5432/assistext_prod?sslmode=require'),
+        'SECRET_KEY': os.environ.get('SECRET_KEY', 'dev-key-change-in-production'),
+        'JWT_SECRET_KEY': os.environ.get('JWT_SECRET_KEY', 'jwt-secret-change-in-production'),
+        'SQLALCHEMY_DATABASE_URI': os.environ.get('DATABASE_URL', 'sqlite:///app.db'),
         'SQLALCHEMY_TRACK_MODIFICATIONS': False,
-        'JWT_SECRET_KEY': os.environ.get('JWT_SECRET_KEY', 'fallback-jwt-key'),
-        'DEBUG': False,
-        'SIGNALWIRE_PROJECT_ID': os.environ.get('SIGNALWIRE_PROJECT_ID'),
-        'SIGNALWIRE_API_TOKEN': os.environ.get('SIGNALWIRE_API_TOKEN'),
-        'SIGNALWIRE_SPACE_URL': os.environ.get('SIGNALWIRE_SPACE_URL'),
-        'LLM_SERVER_URL': os.environ.get('LLM_SERVER_URL', 'http://10.0.0.4:8080'),
-        'CELERY_BROKER_URL': os.environ.get('CELERY_BROKER_URL', 
-            'redis://AssisText2025!Redis:@172.234.219.10:6379/0'),
-        'CELERY_RESULT_BACKEND': os.environ.get('CELERY_RESULT_BACKEND',
-            'redis://AssisText2025!Redis:@172.234.219.10:6379/0')
+        'JWT_ACCESS_TOKEN_EXPIRES': False,  # Tokens don't expire by default
     })
+    logger.info("Using fallback configuration")
 
 def init_extensions_fallback(app):
-    """Fallback extension initialization"""
-    logger.warning("Using fallback extension initialization")
-    
+    """Initialize extensions individually if extensions.py fails"""
     try:
-        from app.extensions import db, jwt
-        db.init_app(app)
-        jwt.init_app(app)
-        logger.info("Basic extensions initialized (db, jwt)")
+        # Try to initialize database
+        from flask_sqlalchemy import SQLAlchemy
+        from flask_migrate import Migrate
         
-        # Try to initialize other extensions individually
-        try:
-            from app.extensions import socketio
-            socketio.init_app(app, cors_allowed_origins="*")
-            logger.info("SocketIO initialized")
-        except:
-            logger.warning("SocketIO initialization failed")
+        db = SQLAlchemy(app)
+        migrate = Migrate(app, db)
         
-        try:
-            from app.extensions import mail
-            mail.init_app(app)
-            logger.info("Mail initialized")
-        except:
-            logger.warning("Mail initialization failed")
-            
-        # Configure JWT error handlers
-        @jwt.expired_token_loader
-        def expired_token_callback(jwt_header, jwt_payload):
-            return {'message': 'Token has expired'}, 401
+        # Try to initialize JWT
+        jwt = JWTManager(app)
         
-        @jwt.invalid_token_loader
-        def invalid_token_callback(error):
-            return {'message': 'Invalid token'}, 401
-            
-    except ImportError as e:
-        logger.error(f"Critical extensions import failed: {e}")
-        raise
+        logger.info("Extensions initialized with fallback method")
+        
+    except Exception as e:
+        logger.error(f"Fallback extension initialization failed: {e}")
 
 def register_basic_routes(app):
     """Register basic application routes"""
@@ -143,153 +118,225 @@ def register_basic_routes(app):
     @app.route('/')
     def index():
         return jsonify({
-            'service': 'AssisText Backend',
+            'message': 'SMS AI Responder API',
+            'version': '2.0.0',
             'status': 'running',
-            'version': '1.0.0'
-        })
-    
-    @app.route('/health')
-    def health_check():
-        """Health check endpoint"""
-        try:
-            from app.extensions import get_extension_status
-            status = get_extension_status()
-        except:
-            status = {'basic': True}
-        
-        return jsonify({
-            'status': 'healthy',
-            'service': 'assistext-backend',
-            'extensions': status,
-            'config': {
-                'debug': app.config.get('DEBUG', False),
-                'database_configured': bool(app.config.get('SQLALCHEMY_DATABASE_URI')),
-                'signalwire_configured': bool(app.config.get('SIGNALWIRE_PROJECT_ID')),
-                'llm_configured': bool(app.config.get('LLM_SERVER_URL'))
+            'endpoints': {
+                'auth': '/api/auth',
+                'user_profile': '/api/user/profile',
+                'clients': '/api/clients',
+                'messages': '/api/messages',
+                'health': '/api/health'
             }
         })
     
-    @app.route('/api/test')
-    def api_test():
-        """Simple API test endpoint"""
+    @app.route('/api/health')
+    def health_check():
+        """Health check endpoint"""
+        try:
+            # Test database connection if available
+            from app.extensions import db
+            db.session.execute('SELECT 1')
+            db_status = 'healthy'
+        except:
+            db_status = 'unavailable'
+        
         return jsonify({
-            'message': 'API is working',
-            'endpoints': [
-                '/health',
-                '/api/test',
-                '/api/auth/*',
-                '/api/signup/*',
-                '/api/webhooks/*'
-            ]
-        })
+            'status': 'healthy',
+            'database': db_status,
+            'timestamp': os.environ.get('timestamp', 'unknown')
+        }), 200
+    
+    @app.route('/api/live')
+    def liveness_check():
+        """Kubernetes/Docker liveness probe"""
+        return jsonify({'status': 'alive'}), 200
 
 def register_error_handlers(app):
-    """Register application error handlers"""
+    """Register global error handlers"""
     
     @app.errorhandler(404)
-    def not_found_error(error):
-        return jsonify({'error': 'Not found'}), 404
+    def not_found(error):
+        return jsonify({'error': 'Endpoint not found'}), 404
+    
+    @app.errorhandler(405)
+    def method_not_allowed(error):
+        return jsonify({'error': 'Method not allowed'}), 405
     
     @app.errorhandler(500)
     def internal_error(error):
         logger.error(f"Internal server error: {error}")
         return jsonify({'error': 'Internal server error'}), 500
     
-    @app.errorhandler(400)
-    def bad_request_error(error):
-        return jsonify({'error': 'Bad request'}), 400
-    
-    @app.errorhandler(401)
-    def unauthorized_error(error):
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    @app.errorhandler(403)
-    def forbidden_error(error):
-        return jsonify({'error': 'Forbidden'}), 403
+    @app.errorhandler(ValidationError)
+    def validation_error(error):
+        return jsonify({'error': 'Validation failed', 'details': error.messages}), 400
 
-def register_blueprints(app):
-    """Register application blueprints"""
+def register_api_blueprints(app):
+    """Register API blueprints - CONSOLIDATED VERSION"""
     
-    # Register authentication routes
+    # Core authentication endpoints
     try:
         from app.api.auth import auth_bp
         app.register_blueprint(auth_bp, url_prefix='/api/auth')
         logger.info("✅ Auth blueprint registered")
     except ImportError as e:
-        logger.warning(f"Could not import auth routes: {e}")
+        logger.warning(f"Could not import auth blueprint: {e}")
     except Exception as e:
-        logger.error(f"Error registering auth routes: {e}")
+        logger.error(f"Error registering auth blueprint: {e}")
     
-    # Register signup routes (SignalWire phone number management)
+    # User profile management (replaces profiles)
     try:
-        from app.api.signup import signup_bp
-        app.register_blueprint(signup_bp, url_prefix='/api/signup')
-        logger.info("✅ Signup blueprint registered")
+        from app.api.user_profile import user_profile_bp
+        app.register_blueprint(user_profile_bp, url_prefix='/api/user')
+        logger.info("✅ User profile blueprint registered")
     except ImportError as e:
-        logger.warning(f"Could not import signup routes: {e}")
+        logger.warning(f"Could not import user profile blueprint: {e}")
     except Exception as e:
-        logger.error(f"Error registering signup routes: {e}")
+        logger.error(f"Error registering user profile blueprint: {e}")
     
-    # Register webhook routes (SignalWire webhooks)
+    # Client management (updated to use user_id)
+    try:
+        from app.api.clients import clients_bp
+        app.register_blueprint(clients_bp, url_prefix='/api/clients')
+        logger.info("✅ Clients blueprint registered")
+    except ImportError as e:
+        logger.warning(f"Could not import clients blueprint: {e}")
+    except Exception as e:
+        logger.error(f"Error registering clients blueprint: {e}")
+    
+    # Message management (updated to use user_id)
+    try:
+        from app.api.messages import messages_bp
+        app.register_blueprint(messages_bp, url_prefix='/api/messages')
+        logger.info("✅ Messages blueprint registered")
+    except ImportError as e:
+        logger.warning(f"Could not import messages blueprint: {e}")
+    except Exception as e:
+        logger.error(f"Error registering messages blueprint: {e}")
+    
+    # Webhook handlers
     try:
         from app.api.webhooks import webhooks_bp
         app.register_blueprint(webhooks_bp, url_prefix='/api/webhooks')
         logger.info("✅ Webhooks blueprint registered")
     except ImportError as e:
-        logger.warning(f"Could not import webhook routes: {e}")
+        logger.warning(f"Could not import webhooks blueprint: {e}")
     except Exception as e:
-        logger.error(f"Error registering webhook routes: {e}")
+        logger.error(f"Error registering webhooks blueprint: {e}")
     
-    # Register fallback webhooks
+    # Billing system (optional)
     try:
-        from app.api.fallback_webhooks import fallback_bp
-        app.register_blueprint(fallback_bp, url_prefix='/api/webhooks/fallback')
-        logger.info("✅ Fallback webhooks registered")
+        from app.api.billing import billing_bp
+        app.register_blueprint(billing_bp, url_prefix='/api/billing')
+        logger.info("✅ Billing blueprint registered")
     except ImportError as e:
-        logger.warning(f"Could not import fallback webhooks: {e}")
+        logger.info(f"⚠️  Billing blueprint not available (optional): {e}")
     except Exception as e:
-        logger.error(f"Error registering fallback webhooks: {e}")
+        logger.warning(f"Error registering billing blueprint: {e}")
     
-    # Register other blueprints as they become available
-    optional_blueprints = [
-        ('app.api.profiles', 'profiles_bp', '/api/profiles'),
-        ('app.api.messages', 'messages_bp', '/api/messages'),
-        ('app.api.clients', 'clients_bp', '/api/clients'),
-        ('app.api.billing', 'billing_bp', '/api/billing')
-    ]
+    # AI Settings management
+    try:
+        from app.api.ai_settings import ai_settings_bp
+        app.register_blueprint(ai_settings_bp, url_prefix='/api/ai')
+        logger.info("✅ AI settings blueprint registered")
+    except ImportError as e:
+        logger.warning(f"Could not import AI settings blueprint: {e}")
+    except Exception as e:
+        logger.error(f"Error registering AI settings blueprint: {e}")
     
-    for module_name, blueprint_name, url_prefix in optional_blueprints:
-        try:
-            module = __import__(module_name, fromlist=[blueprint_name])
-            blueprint = getattr(module, blueprint_name)
-            app.register_blueprint(blueprint, url_prefix=url_prefix)
-            logger.info(f"✅ {blueprint_name} registered")
-        except ImportError:
-            logger.info(f"⚠️  {module_name} not available (optional)")
-        except Exception as e:
-            logger.warning(f"Error registering {blueprint_name}: {e}")
+    # SignalWire integration
+    try:
+        from app.api.signalwire import signalwire_bp
+        app.register_blueprint(signalwire_bp, url_prefix='/api/signalwire')
+        logger.info("✅ SignalWire blueprint registered")
+    except ImportError as e:
+        logger.warning(f"Could not import SignalWire blueprint: {e}")
+    except Exception as e:
+        logger.error(f"Error registering SignalWire blueprint: {e}")
+    
+    # Analytics (optional)
+    try:
+        from app.api.analytics import analytics_bp
+        app.register_blueprint(analytics_bp, url_prefix='/api/analytics')
+        logger.info("✅ Analytics blueprint registered")
+    except ImportError as e:
+        logger.info(f"⚠️  Analytics blueprint not available (optional): {e}")
+    except Exception as e:
+        logger.warning(f"Error registering analytics blueprint: {e}")
 
 def setup_database(app):
     """Set up database models and tables"""
     try:
         from app.extensions import db
         
-        # Import models to register them
+        # Import models to register them with SQLAlchemy
         try:
-            from app.models import User  # Import your models
-            logger.info("Models imported successfully")
-        except ImportError:
-            logger.warning("Could not import models")
+            from app.models.user import User
+            from app.models.message import Message, MessageTemplate
+            from app.models.client import Client
+            logger.info("Core models imported successfully")
+            
+            # Import optional models
+            try:
+                from app.models.subscription import Subscription
+                from app.models.usage_metrics import UsageMetrics
+                logger.info("Optional billing models imported")
+            except ImportError:
+                logger.info("Billing models not available (optional)")
+                
+        except ImportError as e:
+            logger.warning(f"Could not import some models: {e}")
         
         # Create tables if they don't exist
-        db.create_all()
-        logger.info("Database tables created/verified")
+        with app.app_context():
+            db.create_all()
+            logger.info("Database tables created/verified")
         
     except Exception as e:
         logger.error(f"Database setup failed: {e}")
         # Don't raise here - let the app start even if DB setup fails
+
+def setup_jwt_handlers(app):
+    """Set up JWT error handlers"""
+    try:
+        from flask_jwt_extended import JWTManager
         
+        jwt = JWTManager()
+        jwt.init_app(app)
+        
+        @jwt.expired_token_loader
+        def expired_token_callback(jwt_header, jwt_payload):
+            return jsonify({'error': 'Token has expired', 'code': 'TOKEN_EXPIRED'}), 401
+        
+        @jwt.invalid_token_loader
+        def invalid_token_callback(error):
+            return jsonify({'error': 'Invalid token', 'code': 'INVALID_TOKEN'}), 401
+        
+        @jwt.unauthorized_loader
+        def missing_token_callback(error):
+            return jsonify({'error': 'Authorization token required', 'code': 'TOKEN_REQUIRED'}), 401
+        
+        @jwt.revoked_token_loader
+        def revoked_token_callback(jwt_header, jwt_payload):
+            return jsonify({'error': 'Token has been revoked', 'code': 'TOKEN_REVOKED'}), 401
+        
+        logger.info("JWT handlers configured")
+        
+    except Exception as e:
+        logger.error(f"JWT setup failed: {e}")
+
 # For backwards compatibility
 def create_application():
     """Alternative entry point"""
     return create_app()
+
+# Import validation error for error handler
+try:
+    from marshmallow import ValidationError
+except ImportError:
+    # Define a dummy ValidationError if marshmallow is not available
+    class ValidationError(Exception):
+        def __init__(self, messages):
+            self.messages = messages
+            super().__init__(str(messages))

@@ -1,7 +1,7 @@
 # app/api/clients.py
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models.profile import Profile
+from app.models.user import User
 from app.models.client import Client
 from app.models.profile_client import ProfileClient
 from app.models.message import Message
@@ -12,31 +12,28 @@ from sqlalchemy import func, or_, and_
 clients_bp = Blueprint('clients', __name__)
 
 
-@clients_bp.route('/profiles/<int:profile_id>/clients', methods=['GET'])
+@clients_bp.route('/api/clients', methods=['GET'])
 @jwt_required()
-def get_profile_clients(profile_id):
+def get_user_clients(user_id):
     """Get all clients for a specific profile"""
     user_id = get_jwt_identity()
     
-    # Verify ownership
-    profile = Profile.query.filter_by(id=profile_id, user_id=user_id).first()
-    if not profile:
-        return jsonify({'error': 'Profile not found'}), 404
-    
-    try:
+   try:
         # Get query parameters
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 20, type=int), 100)
         search = request.args.get('search', '').strip()
-        status_filter = request.args.get('status')  # new, regular, vip, blocked
+        status_filter = request.args.get('status')
         flagged_only = request.args.get('flagged', 'false').lower() == 'true'
         
-        # Build query - get clients who have messaged this profile
-        query = db.session.query(Client).join(Message, Client.phone_number == Message.sender_number).filter(
-            Message.profile_id == profile_id
+        # Build query - get clients who have messaged this user
+        query = db.session.query(Client).join(
+            Message, Client.phone_number == Message.sender_number
+        ).filter(
+            Message.user_id == user_id  # Changed from profile_id to user_id
         ).distinct()
         
-        # Apply filters
+        # Apply filters (same as before)
         if search:
             query = query.filter(
                 or_(
@@ -67,17 +64,9 @@ def get_profile_clients(profile_id):
         for client in result.items:
             client_data = client.to_dict()
             
-            # Get profile-specific information
-            profile_client = ProfileClient.query.filter_by(
-                profile_id=profile_id,
-                client_id=client.id
-            ).first()
-            
-            if profile_client:
-                client_data['profile_specific'] = profile_client.to_dict()
-            
+                     
             # Get message stats for this client
-            message_stats = get_client_message_stats(profile_id, client.phone_number)
+            message_stats = get_client_message_stats(user_id, client.phone_number)
             client_data['message_stats'] = message_stats
             
             clients.append(client_data)
@@ -115,13 +104,13 @@ def get_client_detail(profile_id, client_id):
         
         # Get profile-specific relationship
         profile_client = ProfileClient.query.filter_by(
-            profile_id=profile_id,
+            
             client_id=client_id
         ).first()
         
         # Get message history
         messages = Message.query.filter(
-            Message.profile_id == profile_id,
+            Message.user_id == user_id,
             Message.sender_number == client.phone_number
         ).order_by(Message.timestamp.desc()).limit(20).all()
         
