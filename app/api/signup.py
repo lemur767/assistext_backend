@@ -1,7 +1,4 @@
-"""
-Updated Signup API with Automatic Webhook Configuration
-app/api/signup.py - Complete phone number purchasing with webhook setup
-"""
+
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.services.signalwire_service import SignalWireService

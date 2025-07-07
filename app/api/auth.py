@@ -63,8 +63,8 @@ class RegistrationAPI(Resource):
             user = User(
                 username=data['username'],
                 email=data['email'],
-                first_name=data['first_name'],
-                last_name=data['last_name'],
+                firstName=data['first_name'],
+                lastName=data['last_name'],
                 personal_phone=data.get('personal_phone')
             )
             user.set_password(data['password'])

@@ -48,8 +48,8 @@ def update_profile():
             user.first_name = data['first_name']
         if 'last_name' in data:
             user.last_name = data['last_name']
-        if 'display_name' in data:
-            user.display_name = data['display_name']
+        if 'username' in data:
+            user.username = data['username']
         if 'phone_number' in data:
             user.phone_number = data['phone_number']
         if 'timezone' in data:
