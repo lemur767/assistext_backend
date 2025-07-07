@@ -23,8 +23,8 @@ class UserRegistrationSchema(Schema):
     email = fields.Email(required=True)
     password = fields.Str(required=True, validate=validate.Length(min=8))
     confirm_password = fields.Str(required=True)
-    first_name = fields.Str(required=True, validate=validate.Length(min=1, max=50))
-    last_name = fields.Str(required=True, validate=validate.Length(min=1, max=50))
+    firstName = fields.Str(required=True, validate=validate.Length(min=1, max=50))
+    lastName = fields.Str(required=True, validate=validate.Length(min=1, max=50))
     personal_phone = fields.Str(allow_none=True, validate=validate.Length(max=20))
 
 
@@ -63,8 +63,8 @@ class RegistrationAPI(Resource):
             user = User(
                 username=data['username'],
                 email=data['email'],
-                firstName=data['first_name'],
-                lastName=data['last_name'],
+                firstName=data['firstName'],
+                lastName=data['lastName'],
                 personal_phone=data.get('personal_phone')
             )
             user.set_password(data['password'])

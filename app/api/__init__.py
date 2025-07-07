@@ -1,7 +1,4 @@
-"""
-API blueprints package initialization.
-This file provides utilities for registering API blueprints.
-"""
+
 
 from flask import Blueprint
 
