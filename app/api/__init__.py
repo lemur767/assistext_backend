@@ -8,8 +8,7 @@ BLUEPRINT_CONFIGS = [
     ('messages', '/api/messages'),
     ('webhooks', '/api/webhooks'),
     ('billing', '/api/billing'),
-    ('text_examples', '/api/text_examples'),
-    ('ai_settings', '/api/ai_settings'),
+    ('user_profile','api/user/profile')
     ('signalwire', '/api/signalwire'),
 ]
 
@@ -20,8 +19,7 @@ def get_blueprint_by_name(name):
         'messages': lambda: __import__('app.api.messages', fromlist=['messages_bp']).messages_bp,
         'webhooks': lambda: __import__('app.api.webhooks', fromlist=['webhooks_bp']).webhooks_bp,
         'billing': lambda: __import__('app.api.billing', fromlist=['billing_bp']).billing_bp,
-        'text_examples': lambda: __import__('app.api.text_examples', fromlist=['text_examples_bp']).text_examples_bp,
-        'ai_settings': lambda: __import__('app.api.ai_settings', fromlist=['ai_settings_bp']).ai_settings_bp,
+        'user_profile': lambda: __import__('app.api.user_profile', fromlist=['user_profile_bp']).user_profile_bp,
         'signalwire': lambda: __import__('app.api.signalwire', fromlist=['signalwire_bp']).signalwire_bp
     }
     if name in blueprint_map:

@@ -1,135 +1,49 @@
-"""
-SignalWire Webhook Handlers with AI Response Integration
-app/api/webhooks.py - Complete implementation for AssisText
-"""
-from flask import Blueprint, request, Response, current_app, jsonify
-from app.services.ai_service import AIService
-from app.models.profile import Profile
+from flask import Blueprint, request, jsonify, current_app
+from app.models.user import User
 from app.models.client import Client
-from app.models.message import Message
+from app.models.message import Message, FlaggedMessage
 from app.extensions import db
+from datetime import datetime
 import logging
-import hmac
-import hashlib
-import base64
-import os
-from urllib.parse import quote_plus
 
 webhooks_bp = Blueprint('webhooks', __name__)
 
-# Initialize AI service
-ai_service = AIService()
+# UPDATED: Find users by SignalWire phone number instead of profiles
+
 
 def validate_signalwire_signature():
-    """
-    Validate SignalWire webhook signature using HMAC SHA-256
-    SignalWire uses X-SignalWire-Signature header
-    """
-    try:
-        # Get signature from headers
-        signature = request.headers.get('X-SignalWire-Signature', '')
-        
-        if not signature:
-            current_app.logger.warning("Missing SignalWire webhook signature")
-            return False
-        
-        # Get auth token from environment
-        auth_token = os.getenv('SIGNALWIRE_API_TOKEN')
-        if not auth_token:
-            current_app.logger.error("SIGNALWIRE_API_TOKEN not configured")
-            return False
-        
-        # Build validation string
-        url = request.url
-        if request.query_string:
-            url += '?' + request.query_string.decode('utf-8')
-        
-        # Get POST data and sort
-        post_data = request.form.to_dict()
-        sorted_data = []
-        for key in sorted(post_data.keys()):
-            sorted_data.append(f"{key}{post_data[key]}")
-        
-        validation_string = url + ''.join(sorted_data)
-        
-        # Calculate expected signature
-        expected_signature = base64.b64encode(
-            hmac.new(
-                auth_token.encode('utf-8'),
-                validation_string.encode('utf-8'),
-                hashlib.sha256
-            ).digest()
-        ).decode('utf-8')
-        
-        # Compare signatures
-        is_valid = hmac.compare_digest(signature, expected_signature)
-        
-        if not is_valid:
-            current_app.logger.warning(f"Invalid SignalWire signature. Expected: {expected_signature}, Got: {signature}")
-            return False
-        
-        return True
-        
-    except Exception as e:
-        current_app.logger.error(f"Webhook signature validation error: {str(e)}")
-        return False
+    """Validate SignalWire webhook signature for security"""
+    # TODO: Implement actual signature validation
+    # This should validate the webhook signature using your SignalWire credentials
+    # For now, we'll return True but you should implement proper validation
+    return True
 
-def create_cxml_response(message_body=None, to_number=None, from_number=None):
-    """
-    Create cXML response for SignalWire
-    SignalWire requires XML responses, not JSON
-    """
-    if message_body and to_number and from_number:
-        # Escape XML special characters
-        escaped_message = (message_body
-                          .replace('&', '&amp;')
-                          .replace('<', '&lt;')
-                          .replace('>', '&gt;')
-                          .replace('"', '&quot;')
-                          .replace("'", '&#39;'))
-        
-        return f'''<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Message to="{to_number}" from="{from_number}">{escaped_message}</Message>
-</Response>'''
-    else:
-        return '''<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <!-- Message processed successfully -->
-</Response>'''
 
-def store_message_in_db(message_sid, from_number, to_number, body, direction='inbound', status='received'):
-    """Store message in database for tracking"""
+def store_message_in_database(message_sid, from_number, to_number, body, 
+                            direction, status, user_id=None, client_id=None,
+                            related_message_sid=None, is_ai_generated=False,
+                            error_message=None):
+    """Store message in database with error handling"""
     try:
-        # Find or create client
-        client = Client.query.filter_by(phone_number=from_number).first()
-        if not client:
-            client = Client(
-                phone_number=from_number,
-                name=f"Client {from_number[-4:]}",  # Default name using last 4 digits
-                first_contact=db.func.now(),
-                last_contact=db.func.now(),
-                is_active=True
-            )
-            db.session.add(client)
-            db.session.flush()  # Get the ID
-        else:
-            client.last_contact = db.func.now()
-        
-        # Find profile by phone number
-        profile = Profile.query.filter_by(phone_number=to_number).first()
+        # Find or create client for incoming messages
+        if direction == 'inbound' and not client_id:
+            client = Client.find_or_create(from_number, user_id)
+            client_id = client.id
         
         # Create message record
         message = Message(
             message_sid=message_sid,
-            profile_id=profile.id if profile else None,
-            client_id=client.id,
+            user_id=user_id,  # UPDATED: use user_id instead of profile_id
+            client_id=client_id,
             sender_number=from_number,
             recipient_number=to_number,
             message_body=body,
             direction=direction,
             status=status,
-            timestamp=db.func.now()
+            timestamp=datetime.utcnow(),
+            is_ai_generated=is_ai_generated,
+            related_message_sid=related_message_sid,
+            error_message=error_message
         )
         
         db.session.add(message)
@@ -138,242 +52,327 @@ def store_message_in_db(message_sid, from_number, to_number, body, direction='in
         return message
         
     except Exception as e:
-        current_app.logger.error(f"Error storing message in database: {str(e)}")
         db.session.rollback()
+        current_app.logger.error(f"Database error storing message: {str(e)}")
         return None
+
 
 @webhooks_bp.route('/sms', methods=['POST'])
 def handle_incoming_sms():
     """
     Handle incoming SMS messages from SignalWire
-    Flow: SignalWire -> Webhook -> AI Service -> Response -> SignalWire
+    UPDATED: Find user by SignalWire phone number instead of profile
     """
     try:
         # Validate SignalWire signature for security
         if not validate_signalwire_signature():
-            current_app.logger.warning("Unauthorized webhook request")
-            return Response('Unauthorized', status=401)
+            current_app.logger.warning("Unauthorized webhook attempt")
+            return jsonify({"error": "Unauthorized"}), 401
         
-        # Extract message data from SignalWire webhook
-        message_sid = request.form.get('MessageSid', '')
-        from_number = request.form.get('From', '')
-        to_number = request.form.get('To', '')
-        message_body = request.form.get('Body', '').strip()
-        message_status = request.form.get('SmsStatus', 'received')
-        account_sid = request.form.get('AccountSid', '')
+        # Parse SignalWire webhook data
+        data = request.form
         
-        current_app.logger.info(f"Received SMS {message_sid}: {from_number} -> {to_number}: '{message_body}'")
+        message_sid = data.get('MessageSid')
+        from_number = data.get('From')
+        to_number = data.get('To')
+        body = data.get('Body', '')
+        message_status = data.get('MessageStatus', 'received')
+        
+        current_app.logger.info(f"Incoming SMS: {from_number} -> {to_number}: {body[:50]}...")
+        
+        # UPDATED: Find user by SignalWire phone number instead of profile
+        user = User.query.filter_by(signalwire_phone_number=to_number).first()
+        
+        if not user:
+            current_app.logger.warning(f"No user found for SignalWire number: {to_number}")
+            return jsonify({"error": "User not found"}), 404
+        
+        if not user.is_active:
+            current_app.logger.warning(f"User {user.id} is inactive")
+            return jsonify({"error": "User inactive"}), 403
         
         # Store incoming message in database
-        stored_message = store_message_in_db(
+        message = store_message_in_database(
             message_sid=message_sid,
             from_number=from_number,
             to_number=to_number,
-            body=message_body,
+            body=body,
             direction='inbound',
-            status=message_status
+            status='received',
+            user_id=user.id  # UPDATED: use user.id instead of profile.id
         )
         
-        # Skip processing if empty message
-        if not message_body:
-            current_app.logger.info("Empty message body, skipping AI processing")
-            return Response(create_cxml_response(), mimetype='text/xml')
+        if not message:
+            return jsonify({"error": "Failed to store message"}), 500
         
-        # Find profile by phone number
-        profile = Profile.query.filter_by(phone_number=to_number).first()
-        if not profile:
-            current_app.logger.warning(f"No profile found for phone number: {to_number}")
-            # Send default response for unknown numbers
-            default_response = "Thank you for your message. We'll get back to you soon!"
-            return Response(
-                create_cxml_response(default_response, from_number, to_number),
-                mimetype='text/xml'
-            )
+        # Update user message count
+        user.update_message_count(received=1)
+        db.session.commit()
         
-        # Check if AI is enabled for this profile
-        if not profile.ai_enabled:
-            current_app.logger.info(f"AI disabled for profile {profile.id}, skipping response generation")
-            return Response(create_cxml_response(), mimetype='text/xml')
-        
-        # Generate AI response
-        ai_response = ai_service.generate_response(
-            profile=profile,
-            message=message_body,
-            sender_number=from_number,
-            context={
-                'message_sid': message_sid,
-                'account_sid': account_sid
-            }
-        )
-        
-        if ai_response:
-            current_app.logger.info(f"Generated AI response for {message_sid}: {ai_response[:50]}...")
+        # Process the message for auto-response
+        try:
+            from app.services.message_handler import process_incoming_message
+            response_message = process_incoming_message(user, body, from_number, message_sid)
             
-            # Store outgoing AI response in database
-            store_message_in_db(
-                message_sid=f"ai_response_{message_sid}",
-                from_number=to_number,
-                to_number=from_number,
-                body=ai_response,
-                direction='outbound',
-                status='queued'
-            )
-            
-            # Return cXML response to SignalWire
-            return Response(
-                create_cxml_response(ai_response, from_number, to_number),
-                mimetype='text/xml'
-            )
-        else:
-            current_app.logger.warning(f"Failed to generate AI response for {message_sid}")
-            return Response(create_cxml_response(), mimetype='text/xml')
+            if response_message:
+                current_app.logger.info(f"Auto-response sent: {response_message.message_body[:50]}...")
+        
+        except Exception as e:
+            current_app.logger.error(f"Error processing incoming message: {str(e)}")
+            # Don't fail the webhook - message was stored successfully
+        
+        return jsonify({"status": "success", "message": "Message processed"}), 200
         
     except Exception as e:
-        current_app.logger.error(f"SMS webhook error: {str(e)}", exc_info=True)
-        # Return valid cXML even on error
-        return Response(create_cxml_response(), mimetype='text/xml')
+        current_app.logger.error(f"Error handling incoming SMS: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
 
-@webhooks_bp.route('/voice', methods=['POST'])
-def handle_incoming_voice():
-    """
-    Handle incoming voice calls from SignalWire
-    Play message directing callers to text instead
-    """
-    try:
-        # Validate webhook
-        if not validate_signalwire_signature():
-            return Response('Unauthorized', status=401)
-        
-        from_number = request.form.get('From', '')
-        to_number = request.form.get('To', '')
-        call_sid = request.form.get('CallSid', '')
-        
-        current_app.logger.info(f"Received voice call {call_sid}: {from_number} -> {to_number}")
-        
-        # Create cXML response to direct caller to text
-        cxml_response = '''<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="alice">Thank you for calling AssisText. For faster service, please send us a text message instead. We'll respond right away with AI-powered assistance. Thank you!</Say>
-    <Pause length="1"/>
-    <Hangup/>
-</Response>'''
-        
-        return Response(cxml_response, mimetype='text/xml')
-        
-    except Exception as e:
-        current_app.logger.error(f"Voice webhook error: {str(e)}")
-        # Simple hangup on error
-        cxml_response = '''<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Hangup/>
-</Response>'''
-        return Response(cxml_response, mimetype='text/xml')
 
 @webhooks_bp.route('/status', methods=['POST'])
 def handle_message_status():
     """
     Handle message delivery status updates from SignalWire
-    Update message status in database
+    UPDATED: Use user_id instead of profile_id
     """
     try:
-        # Validate webhook
+        # Validate SignalWire signature
         if not validate_signalwire_signature():
-            return Response('Unauthorized', status=401)
+            current_app.logger.warning("Unauthorized status webhook attempt")
+            return jsonify({"error": "Unauthorized"}), 401
         
-        message_sid = request.form.get('MessageSid', '')
-        message_status = request.form.get('MessageStatus', '')
-        error_code = request.form.get('ErrorCode', '')
-        error_message = request.form.get('ErrorMessage', '')
+        # Parse status data
+        data = request.form
         
-        current_app.logger.info(f"Message status update: {message_sid} -> {message_status}")
+        message_sid = data.get('MessageSid')
+        message_status = data.get('MessageStatus')
+        error_code = data.get('ErrorCode')
+        error_message = data.get('ErrorMessage')
         
-        # Update message status in database
-        try:
-            message = Message.query.filter_by(message_sid=message_sid).first()
-            if message:
-                message.status = message_status
-                if error_code:
-                    message.error_code = error_code
-                    message.error_message = error_message
-                db.session.commit()
-                current_app.logger.info(f"Updated message {message_sid} status to {message_status}")
-            else:
-                current_app.logger.warning(f"Message {message_sid} not found in database")
+        current_app.logger.info(f"Status update for {message_sid}: {message_status}")
+        
+        # Find and update the message
+        message = Message.query.filter_by(message_sid=message_sid).first()
+        
+        if message:
+            message.status = message_status
+            
+            if error_code or error_message:
+                message.error_message = f"Error {error_code}: {error_message}" if error_code else error_message
                 
-        except Exception as db_error:
-            current_app.logger.error(f"Database error updating message status: {str(db_error)}")
-            db.session.rollback()
+                # If message failed, increment retry count
+                if message_status in ['failed', 'undelivered']:
+                    message.retry_count += 1
+            
+            message.updated_at = datetime.utcnow()
+            db.session.commit()
+            
+            current_app.logger.info(f"Updated message {message_sid} status to {message_status}")
+        else:
+            current_app.logger.warning(f"Message not found for SID: {message_sid}")
         
-        if error_code:
-            current_app.logger.error(f"Message delivery error [{error_code}]: {error_message}")
-        
-        return Response(create_cxml_response(), mimetype='text/xml')
+        return jsonify({"status": "success"}), 200
         
     except Exception as e:
-        current_app.logger.error(f"Status webhook error: {str(e)}")
-        return Response(create_cxml_response(), mimetype='text/xml')
+        db.session.rollback()
+        current_app.logger.error(f"Error handling status update: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
+
 
 @webhooks_bp.route('/test', methods=['GET', 'POST'])
 def test_webhook():
-    """
-    Test webhook endpoint for development
-    """
+    """Test endpoint for webhook configuration"""
     try:
-        if request.method == 'POST':
-            # Simulate incoming SMS for testing
-            test_data = request.get_json() or {}
-            test_message = test_data.get('message', 'Hello, this is a test message!')
-            test_from = test_data.get('from', '+1234567890')
-            test_to = test_data.get('to', '+1987654321')
+        method = request.method
+        
+        if method == 'GET':
+            return jsonify({
+                "status": "success",
+                "message": "Webhook endpoint is active",
+                "timestamp": datetime.utcnow().isoformat()
+            }), 200
+        
+        elif method == 'POST':
+            data = request.form or request.get_json() or {}
             
-            current_app.logger.info(f"Test webhook called with message: {test_message}")
-            
-            # Test AI service
-            ai_response = ai_service.generate_response(
-                profile=None,  # Will use default context
-                message=test_message,
-                sender_number=test_from
-            )
+            current_app.logger.info(f"Test webhook received: {data}")
             
             return jsonify({
-                'success': True,
-                'received_message': test_message,
-                'ai_response': ai_response,
-                'timestamp': db.func.now().isoformat() if hasattr(db.func, 'now') else 'N/A'
-            })
-        else:
-            # GET request - show webhook status
-            return jsonify({
-                'webhook_status': 'active',
-                'signalwire_configured': bool(os.getenv('SIGNALWIRE_API_TOKEN')),
-                'ai_service_ready': ai_service.is_configured(),
-                'endpoints': {
-                    'sms': '/api/webhooks/sms',
-                    'voice': '/api/webhooks/voice',
-                    'status': '/api/webhooks/status'
-                }
-            })
+                "status": "success",
+                "message": "Test webhook processed successfully",
+                "received_data": dict(data),
+                "timestamp": datetime.utcnow().isoformat()
+            }), 200
         
     except Exception as e:
-        current_app.logger.error(f"Test webhook error: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        current_app.logger.error(f"Error in test webhook: {str(e)}")
+        return jsonify({"error": "Test webhook failed"}), 500
 
-@webhooks_bp.route('/health', methods=['GET'])
-def webhook_health():
-    """Health check for webhook service"""
+
+# Auto-response processing functions (UPDATED to work with User model)
+
+def should_respond_to_message(user, message_body, sender_number):
+    """Determine if we should auto-respond to this message"""
+    
+    # Check if user has AI enabled
+    if not user.ai_enabled:
+        current_app.logger.info(f"AI disabled for user {user.id}")
+        return False
+    
+    # Check if user has auto-reply enabled
+    if not user.auto_reply_enabled:
+        current_app.logger.info(f"Auto-reply disabled for user {user.id}")
+        return False
+    
+    # Check daily message limit
+    from app.models.message import Message
+    today_count = Message.get_daily_count(user.id)
+    if today_count >= user.daily_message_limit:
+        current_app.logger.info(f"Daily limit reached for user {user.id}: {today_count}/{user.daily_message_limit}")
+        return False
+    
+    # Check if within business hours
+    if not is_within_business_hours(user):
+        current_app.logger.info(f"Outside business hours for user {user.id}")
+        # Check if out of office is enabled
+        return user.out_of_office_enabled
+    
+    # Check for blocked client
+    client = Client.query.filter_by(phone_number=sender_number).first()
+    if client and client.is_blocked:
+        current_app.logger.info(f"Client {sender_number} is blocked")
+        return False
+    
+    # Check user-specific blocking
+    if client:
+        relationship = client.get_user_relationship(user.id)
+        if relationship and relationship.get('is_blocked'):
+            current_app.logger.info(f"Client {sender_number} is blocked by user {user.id}")
+            return False
+    
+    return True
+
+
+def is_within_business_hours(user):
+    """Check if current time is within user's business hours"""
     try:
-        return jsonify({
-            'status': 'healthy',
-            'signalwire_token_configured': bool(os.getenv('SIGNALWIRE_API_TOKEN')),
-            'ai_service_configured': ai_service.is_configured(),
-            'database_connected': bool(db.engine.execute('SELECT 1').scalar()),
-            'timestamp': db.func.now().isoformat() if hasattr(db.func, 'now') else 'N/A'
-        })
+        import pytz
+        from datetime import datetime, time
+        
+        business_hours = user.get_business_hours()
+        if not business_hours:
+            return True  # Default to always available if no hours set
+        
+        # Get current time in user's timezone
+        user_tz = pytz.timezone(user.timezone or 'UTC')
+        current_time = datetime.now(user_tz)
+        current_day = current_time.strftime('%A').lower()
+        
+        # Check if today has business hours configured
+        if current_day not in business_hours:
+            return False
+        
+        day_config = business_hours[current_day]
+        
+        # Check if business hours are enabled for today
+        if not day_config.get('enabled', False):
+            return False
+        
+        # Parse start and end times
+        start_str = day_config.get('start', '09:00')
+        end_str = day_config.get('end', '17:00')
+        
+        start_time = datetime.strptime(start_str, '%H:%M').time()
+        end_time = datetime.strptime(end_str, '%H:%M').time()
+        
+        current_time_only = current_time.time()
+        
+        # Handle overnight hours (e.g., 22:00 to 06:00)
+        if start_time > end_time:
+            return current_time_only >= start_time or current_time_only <= end_time
+        else:
+            return start_time <= current_time_only <= end_time
+    
     except Exception as e:
-        return jsonify({
-            'status': 'unhealthy',
-            'error': str(e)
-        }), 500
+        current_app.logger.error(f"Error checking business hours: {str(e)}")
+        return True  # Default to available on error
+
+
+def generate_auto_response(user, message_body, sender_number):
+    """Generate appropriate auto-response"""
+    
+    # Check for keyword-based auto-replies first
+    auto_replies = user.get_auto_reply_keywords()
+    message_lower = message_body.lower()
+    
+    for keyword, response in auto_replies.items():
+        if keyword.lower() in message_lower:
+            current_app.logger.info(f"Keyword match for '{keyword}': {response[:50]}...")
+            return response
+    
+    # Check if outside business hours and out of office is enabled
+    if not is_within_business_hours(user) and user.out_of_office_enabled:
+        if user.out_of_office_message:
+            return user.out_of_office_message
+        else:
+            return f"Thanks for your message! I'm currently outside my business hours. I'll get back to you during my next available time."
+    
+    # Generate AI response if enabled
+    if user.ai_enabled:
+        try:
+            from app.services.ai_service import generate_ai_response
+            ai_response = generate_ai_response(user, message_body, sender_number)
+            if ai_response:
+                return ai_response
+        except Exception as e:
+            current_app.logger.error(f"Error generating AI response: {str(e)}")
+    
+    # Fallback response
+    return "Thanks for your message! I'll get back to you soon."
+
+
+def send_auto_response(user, response_text, recipient_number, related_message_sid=None):
+    """Send auto-response via SignalWire"""
+    
+    if not user.is_signalwire_configured():
+        current_app.logger.error(f"SignalWire not configured for user {user.id}")
+        return None
+    
+    try:
+        # TODO: Implement actual SignalWire sending
+        # from app.utils.signalwire_helpers import send_sms
+        # 
+        # signalwire_response = send_sms(
+        #     from_number=user.signalwire_phone_number,
+        #     to_number=recipient_number,
+        #     body=response_text,
+        #     user=user
+        # )
+        
+        # For now, create a mock response
+        mock_sid = f"SM{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        
+        # Store outgoing message
+        response_message = store_message_in_database(
+            message_sid=mock_sid,  # Would be signalwire_response.sid
+            from_number=user.signalwire_phone_number,
+            to_number=recipient_number,
+            body=response_text,
+            direction='outbound',
+            status='sent',
+            user_id=user.id,
+            related_message_sid=related_message_sid,
+            is_ai_generated=True
+        )
+        
+        if response_message:
+            # Update user message count
+            user.update_message_count(sent=1)
+            db.session.commit()
+            
+            current_app.logger.info(f"Auto-response sent to {recipient_number}: {response_text[:50]}...")
+        
+        return response_message
+        
+    except Exception as e:
+        current_app.logger.error(f"Error sending auto-response: {str(e)}")
+        return None

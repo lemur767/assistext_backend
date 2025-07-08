@@ -1,9 +1,7 @@
-# app/api/clients.py
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models.user import User
 from app.models.client import Client
-from app.models.profile_client import ProfileClient
 from app.models.message import Message
 from app.extensions import db
 from datetime import datetime, timedelta
@@ -11,48 +9,63 @@ from sqlalchemy import func, or_, and_
 
 clients_bp = Blueprint('clients', __name__)
 
+# UPDATED: Remove profile_id from all endpoints, use user_id from JWT
 
-@clients_bp.route('/api/clients', methods=['GET'])
+
+@clients_bp.route('', methods=['GET'])
 @jwt_required()
-def get_user_clients(user_id):
-    """Get all clients for a specific profile"""
-    user_id = get_jwt_identity()
-    
-   try:
+def get_user_clients():
+    """Get all clients for the current user (no profile_id needed)"""
+    try:
+        user_id = get_jwt_identity()
+        
         # Get query parameters
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 20, type=int), 100)
         search = request.args.get('search', '').strip()
         status_filter = request.args.get('status')
         flagged_only = request.args.get('flagged', 'false').lower() == 'true'
+        client_type = request.args.get('type')  # 'new', 'regular', 'vip', 'blocked'
         
         # Build query - get clients who have messaged this user
-        query = db.session.query(Client).join(
-            Message, Client.phone_number == Message.sender_number
-        ).filter(
-            Message.user_id == user_id  # Changed from profile_id to user_id
-        ).distinct()
+        query = Client.get_user_clients(user_id, active_only=False, search=search)
         
-        # Apply filters (same as before)
+        # Convert to SQLAlchemy query for pagination
         if search:
-            query = query.filter(
+            search_term = f"%{search}%"
+            query = Client.query.join(
+                db.text('user_clients'), Client.id == db.text('user_clients.client_id')
+            ).filter(
+                db.text('user_clients.user_id') == user_id,
                 or_(
                     Client.phone_number.contains(search),
-                    Client.name.ilike(f'%{search}%'),
-                    Client.email.ilike(f'%{search}%')
+                    Client.name.ilike(search_term),
+                    Client.email.ilike(search_term)
                 )
             )
+        else:
+            query = Client.query.join(
+                db.text('user_clients'), Client.id == db.text('user_clients.client_id')
+            ).filter(db.text('user_clients.user_id') == user_id)
         
-        if status_filter:
-            if status_filter == 'blocked':
-                query = query.filter(Client.is_blocked == True)
-            elif status_filter == 'regular':
-                query = query.filter(Client.is_regular == True)
-            elif status_filter == 'flagged':
-                query = query.filter(Client.is_flagged == True)
+        # Apply filters
+        if status_filter == 'active':
+            query = query.filter(Client.is_active == True)
+        elif status_filter == 'blocked':
+            query = query.filter(Client.is_blocked == True)
+        elif status_filter == 'inactive':
+            query = query.filter(Client.is_active == False)
+        
+        if client_type:
+            query = query.filter(Client.client_type == client_type)
         
         if flagged_only:
-            query = query.filter(Client.is_flagged == True)
+            # Get clients with flagged messages
+            flagged_client_ids = db.session.query(Message.client_id).filter(
+                Message.user_id == user_id,
+                Message.is_flagged == True
+            ).distinct().subquery()
+            query = query.filter(Client.id.in_(flagged_client_ids))
         
         # Order by last contact
         query = query.order_by(Client.last_contact.desc())
@@ -60,19 +73,37 @@ def get_user_clients(user_id):
         # Paginate
         result = query.paginate(page=page, per_page=per_page, error_out=False)
         
-        clients = []
+        # Convert to dict with user-specific data
+        clients_data = []
         for client in result.items:
-            client_data = client.to_dict()
+            client_dict = client.to_dict(user_id=user_id, include_stats=True)
             
-                     
-            # Get message stats for this client
-            message_stats = get_client_message_stats(user_id, client.phone_number)
-            client_data['message_stats'] = message_stats
+            # Add message count for this user
+            message_count = Message.query.filter(
+                Message.client_id == client.id,
+                Message.user_id == user_id
+            ).count()
+            client_dict['message_count'] = message_count
             
-            clients.append(client_data)
+            # Add last message info
+            last_message = Message.query.filter(
+                Message.client_id == client.id,
+                Message.user_id == user_id
+            ).order_by(Message.timestamp.desc()).first()
+            
+            if last_message:
+                client_dict['last_message'] = {
+                    'content': last_message.message_body[:100] + '...' if len(last_message.message_body) > 100 else last_message.message_body,
+                    'timestamp': last_message.timestamp.isoformat(),
+                    'direction': last_message.direction,
+                    'is_ai_generated': last_message.is_ai_generated
+                }
+            
+            clients_data.append(client_dict)
         
         return jsonify({
-            'clients': clients,
+            'success': True,
+            'clients': clients_data,
             'pagination': {
                 'page': page,
                 'per_page': per_page,
@@ -84,118 +115,134 @@ def get_user_clients(user_id):
         }), 200
         
     except Exception as e:
-        current_app.logger.error(f"Error getting profile clients: {str(e)}")
-        return jsonify({'error': 'Failed to retrieve clients'}), 500
+        current_app.logger.error(f"Error getting clients: {str(e)}")
+        return jsonify({'error': 'Failed to get clients'}), 500
 
 
-@clients_bp.route('/profiles/<int:profile_id>/clients/<int:client_id>', methods=['GET'])
+@clients_bp.route('/<int:client_id>', methods=['GET'])
 @jwt_required()
-def get_client_detail(profile_id, client_id):
+def get_client_details():
     """Get detailed information about a specific client"""
-    user_id = get_jwt_identity()
-    
-    # Verify ownership
-    profile = Profile.query.filter_by(id=profile_id, user_id=user_id).first()
-    if not profile:
-        return jsonify({'error': 'Profile not found'}), 404
-    
     try:
-        client = Client.query.get_or_404(client_id)
+        user_id = get_jwt_identity()
+        client_id = request.view_args['client_id']
         
-        # Get profile-specific relationship
-        profile_client = ProfileClient.query.filter_by(
-            
-            client_id=client_id
+        # Verify client belongs to user
+        client = Client.query.join(
+            db.text('user_clients'), Client.id == db.text('user_clients.client_id')
+        ).filter(
+            Client.id == client_id,
+            db.text('user_clients.user_id') == user_id
         ).first()
+        
+        if not client:
+            return jsonify({'error': 'Client not found'}), 404
+        
+        # Get client data with full details
+        client_data = client.to_dict(user_id=user_id, include_stats=True)
         
         # Get message history
         messages = Message.query.filter(
+            Message.client_id == client_id,
+            Message.user_id == user_id
+        ).order_by(Message.timestamp.desc()).limit(50).all()
+        
+        client_data['recent_messages'] = [msg.to_dict(include_client_info=False) for msg in messages]
+        
+        # Get conversation stats
+        total_messages = Message.query.filter(
+            Message.client_id == client_id,
+            Message.user_id == user_id
+        ).count()
+        
+        ai_generated_count = Message.query.filter(
+            Message.client_id == client_id,
             Message.user_id == user_id,
-            Message.sender_number == client.phone_number
-        ).order_by(Message.timestamp.desc()).limit(20).all()
+            Message.is_ai_generated == True
+        ).count()
         
-        # Get interaction timeline
-        timeline = get_client_timeline(profile_id, client.phone_number)
+        flagged_count = Message.query.filter(
+            Message.client_id == client_id,
+            Message.user_id == user_id,
+            Message.is_flagged == True
+        ).count()
         
-        client_detail = {
-            'client': client.to_dict(),
-            'profile_relationship': profile_client.to_dict() if profile_client else None,
-            'recent_messages': [msg.to_dict() for msg in messages],
-            'timeline': timeline,
-            'stats': get_client_message_stats(profile_id, client.phone_number)
+        client_data['conversation_stats'] = {
+            'total_messages': total_messages,
+            'ai_generated_count': ai_generated_count,
+            'flagged_count': flagged_count,
+            'response_rate': round((ai_generated_count / max(total_messages, 1)) * 100, 1)
         }
         
-        return jsonify(client_detail), 200
+        return jsonify({
+            'success': True,
+            'client': client_data
+        }), 200
         
     except Exception as e:
-        current_app.logger.error(f"Error getting client detail: {str(e)}")
-        return jsonify({'error': 'Failed to retrieve client details'}), 500
+        current_app.logger.error(f"Error getting client details: {str(e)}")
+        return jsonify({'error': 'Failed to get client details'}), 500
 
 
-@clients_bp.route('/profiles/<int:profile_id>/clients/<int:client_id>', methods=['PUT'])
+@clients_bp.route('/<int:client_id>', methods=['PUT'])
 @jwt_required()
-def update_client(profile_id, client_id):
+def update_client():
     """Update client information"""
-    user_id = get_jwt_identity()
-    data = request.json
-    
-    # Verify ownership
-    profile = Profile.query.filter_by(id=profile_id, user_id=user_id).first()
-    if not profile:
-        return jsonify({'error': 'Profile not found'}), 404
-    
     try:
-        client = Client.query.get_or_404(client_id)
+        user_id = get_jwt_identity()
+        client_id = request.view_args['client_id']
+        
+        # Verify client belongs to user
+        client = Client.query.join(
+            db.text('user_clients'), Client.id == db.text('user_clients.client_id')
+        ).filter(
+            Client.id == client_id,
+            db.text('user_clients.user_id') == user_id
+        ).first()
+        
+        if not client:
+            return jsonify({'error': 'Client not found'}), 404
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
         
         # Update client basic info
         if 'name' in data:
             client.name = data['name']
         if 'email' in data:
             client.email = data['email']
+        if 'client_type' in data:
+            valid_types = ['new', 'regular', 'vip', 'blocked']
+            if data['client_type'] in valid_types:
+                client.client_type = data['client_type']
+        if 'source' in data:
+            client.source = data['source']
+        
+        # Update user-specific relationship data
+        relationship_updates = {}
         if 'notes' in data:
-            client.notes = data['notes']
+            relationship_updates['notes'] = data['notes']
         if 'is_blocked' in data:
-            client.is_blocked = data['is_blocked']
-        if 'is_flagged' in data:
-            client.is_flagged = data['is_flagged']
-        if 'is_regular' in data:
-            client.is_regular = data['is_regular']
-        if 'risk_level' in data:
-            client.risk_level = data['risk_level']
+            relationship_updates['is_blocked'] = data['is_blocked']
+            # Also update client's blocked status
+            if data['is_blocked']:
+                client.block_client("Blocked by user")
+            else:
+                client.unblock_client()
+        if 'is_favorite' in data:
+            relationship_updates['is_favorite'] = data['is_favorite']
+        
+        if relationship_updates:
+            client.update_user_relationship(user_id, **relationship_updates)
         
         client.updated_at = datetime.utcnow()
-        
-        # Update or create profile-specific relationship
-        profile_client = ProfileClient.query.filter_by(
-            profile_id=profile_id,
-            client_id=client_id
-        ).first()
-        
-        if not profile_client:
-            profile_client = ProfileClient(
-                profile_id=profile_id,
-                client_id=client_id
-            )
-            db.session.add(profile_client)
-        
-        # Update profile-specific fields
-        if 'nickname' in data:
-            profile_client.nickname = data['nickname']
-        if 'profile_notes' in data:
-            profile_client.notes = data['profile_notes']
-        if 'tags' in data:
-            profile_client.tags = ','.join(data['tags']) if data['tags'] else ''
-        if 'relationship_status' in data:
-            profile_client.relationship_status = data['relationship_status']
-        
-        profile_client.updated_at = datetime.utcnow()
-        
         db.session.commit()
         
         return jsonify({
+            'success': True,
             'message': 'Client updated successfully',
-            'client': client.to_dict(),
-            'profile_relationship': profile_client.to_dict()
+            'client': client.to_dict(user_id=user_id, include_stats=True)
         }), 200
         
     except Exception as e:
@@ -204,27 +251,36 @@ def update_client(profile_id, client_id):
         return jsonify({'error': 'Failed to update client'}), 500
 
 
-@clients_bp.route('/profiles/<int:profile_id>/clients/<int:client_id>/block', methods=['POST'])
+@clients_bp.route('/<int:client_id>/block', methods=['POST'])
 @jwt_required()
-def block_client(profile_id, client_id):
+def block_client():
     """Block a client"""
-    user_id = get_jwt_identity()
-    
-    # Verify ownership
-    profile = Profile.query.filter_by(id=profile_id, user_id=user_id).first()
-    if not profile:
-        return jsonify({'error': 'Profile not found'}), 404
-    
     try:
-        client = Client.query.get_or_404(client_id)
-        client.is_blocked = True
-        client.updated_at = datetime.utcnow()
+        user_id = get_jwt_identity()
+        client_id = request.view_args['client_id']
+        
+        client = Client.query.join(
+            db.text('user_clients'), Client.id == db.text('user_clients.client_id')
+        ).filter(
+            Client.id == client_id,
+            db.text('user_clients.user_id') == user_id
+        ).first()
+        
+        if not client:
+            return jsonify({'error': 'Client not found'}), 404
+        
+        data = request.get_json() or {}
+        reason = data.get('reason', 'Blocked by user')
+        
+        # Block client globally and update user relationship
+        client.block_client(reason)
+        client.update_user_relationship(user_id, is_blocked=True, notes=f"Blocked: {reason}")
         
         db.session.commit()
         
         return jsonify({
-            'message': 'Client blocked successfully',
-            'client': client.to_dict()
+            'success': True,
+            'message': 'Client blocked successfully'
         }), 200
         
     except Exception as e:
@@ -233,27 +289,33 @@ def block_client(profile_id, client_id):
         return jsonify({'error': 'Failed to block client'}), 500
 
 
-@clients_bp.route('/profiles/<int:profile_id>/clients/<int:client_id>/unblock', methods=['POST'])
+@clients_bp.route('/<int:client_id>/unblock', methods=['POST'])
 @jwt_required()
-def unblock_client(profile_id, client_id):
+def unblock_client():
     """Unblock a client"""
-    user_id = get_jwt_identity()
-    
-    # Verify ownership
-    profile = Profile.query.filter_by(id=profile_id, user_id=user_id).first()
-    if not profile:
-        return jsonify({'error': 'Profile not found'}), 404
-    
     try:
-        client = Client.query.get_or_404(client_id)
-        client.is_blocked = False
-        client.updated_at = datetime.utcnow()
+        user_id = get_jwt_identity()
+        client_id = request.view_args['client_id']
+        
+        client = Client.query.join(
+            db.text('user_clients'), Client.id == db.text('user_clients.client_id')
+        ).filter(
+            Client.id == client_id,
+            db.text('user_clients.user_id') == user_id
+        ).first()
+        
+        if not client:
+            return jsonify({'error': 'Client not found'}), 404
+        
+        # Unblock client and update user relationship
+        client.unblock_client()
+        client.update_user_relationship(user_id, is_blocked=False)
         
         db.session.commit()
         
         return jsonify({
-            'message': 'Client unblocked successfully',
-            'client': client.to_dict()
+            'success': True,
+            'message': 'Client unblocked successfully'
         }), 200
         
     except Exception as e:
@@ -262,184 +324,55 @@ def unblock_client(profile_id, client_id):
         return jsonify({'error': 'Failed to unblock client'}), 500
 
 
-def get_client_message_stats(profile_id, phone_number, days=30):
-    """Get message statistics for a client"""
-    try:
-        since_date = datetime.utcnow() - timedelta(days=days)
-        
-        total_messages = Message.query.filter(
-            Message.profile_id == profile_id,
-            Message.sender_number == phone_number,
-            Message.timestamp >= since_date
-        ).count()
-        
-        incoming_count = Message.query.filter(
-            Message.profile_id == profile_id,
-            Message.sender_number == phone_number,
-            Message.is_incoming == True,
-            Message.timestamp >= since_date
-        ).count()
-        
-        outgoing_count = Message.query.filter(
-            Message.profile_id == profile_id,
-            Message.sender_number == phone_number,
-            Message.is_incoming == False,
-            Message.timestamp >= since_date
-        ).count()
-        
-        ai_responses = Message.query.filter(
-            Message.profile_id == profile_id,
-            Message.sender_number == phone_number,
-            Message.is_incoming == False,
-            Message.ai_generated == True,
-            Message.timestamp >= since_date
-        ).count()
-        
-        flagged_count = Message.query.filter(
-            Message.profile_id == profile_id,
-            Message.sender_number == phone_number,
-            Message.flagged == True,
-            Message.timestamp >= since_date
-        ).count()
-        
-        # Get first and last message dates
-        first_message = Message.query.filter(
-            Message.profile_id == profile_id,
-            Message.sender_number == phone_number
-        ).order_by(Message.timestamp.asc()).first()
-        
-        last_message = Message.query.filter(
-            Message.profile_id == profile_id,
-            Message.sender_number == phone_number
-        ).order_by(Message.timestamp.desc()).first()
-        
-        return {
-            'total_messages': total_messages,
-            'incoming_messages': incoming_count,
-            'outgoing_messages': outgoing_count,
-            'ai_responses': ai_responses,
-            'flagged_messages': flagged_count,
-            'first_contact': first_message.timestamp.isoformat() if first_message else None,
-            'last_contact': last_message.timestamp.isoformat() if last_message else None,
-            'days_period': days
-        }
-        
-    except Exception as e:
-        current_app.logger.error(f"Error getting client stats: {str(e)}")
-        return {}
-
-
-def get_client_timeline(profile_id, phone_number, limit=50):
-    """Get interaction timeline for a client"""
-    try:
-        # Get messages and group by day
-        messages = Message.query.filter(
-            Message.profile_id == profile_id,
-            Message.sender_number == phone_number
-        ).order_by(Message.timestamp.desc()).limit(limit).all()
-        
-        timeline = {}
-        for msg in messages:
-            date_key = msg.timestamp.date().isoformat()
-            if date_key not in timeline:
-                timeline[date_key] = {
-                    'date': date_key,
-                    'incoming_count': 0,
-                    'outgoing_count': 0,
-                    'ai_responses': 0,
-                    'flagged_count': 0,
-                    'messages': []
-                }
-            
-            timeline[date_key]['messages'].append({
-                'id': msg.id,
-                'content': msg.content[:100] + '...' if len(msg.content) > 100 else msg.content,
-                'is_incoming': msg.is_incoming,
-                'ai_generated': msg.ai_generated,
-                'flagged': msg.flagged,
-                'timestamp': msg.timestamp.isoformat()
-            })
-            
-            if msg.is_incoming:
-                timeline[date_key]['incoming_count'] += 1
-            else:
-                timeline[date_key]['outgoing_count'] += 1
-            
-            if msg.ai_generated:
-                timeline[date_key]['ai_responses'] += 1
-            
-            if msg.flagged:
-                timeline[date_key]['flagged_count'] += 1
-        
-        # Convert to sorted list
-        timeline_list = list(timeline.values())
-        timeline_list.sort(key=lambda x: x['date'], reverse=True)
-        
-        return timeline_list
-        
-    except Exception as e:
-        current_app.logger.error(f"Error getting client timeline: {str(e)}")
-        return []
-
-
-@clients_bp.route('/search', methods=['GET'])
+@clients_bp.route('/<int:client_id>/messages', methods=['GET'])
 @jwt_required()
-def search_clients():
-    """Search clients across all user's profiles"""
-    user_id = get_jwt_identity()
-    
+def get_client_messages():
+    """Get message history with a specific client"""
     try:
-        # Get search parameters
-        query = request.args.get('q', '').strip()
-        page = request.args.get('page', 1, type=int)
-        per_page = min(request.args.get('per_page', 20, type=int), 100)
+        user_id = get_jwt_identity()
+        client_id = request.view_args['client_id']
         
-        if not query or len(query) < 2:
-            return jsonify({'error': 'Search query must be at least 2 characters'}), 400
-        
-        # Get user's profiles
-        user_profiles = Profile.query.filter_by(user_id=user_id).all()
-        profile_ids = [p.id for p in user_profiles]
-        
-        if not profile_ids:
-            return jsonify({'clients': [], 'pagination': {}}), 200
-        
-        # Search clients who have messaged any of user's profiles
-        search_query = db.session.query(Client).join(
-            Message, Client.phone_number == Message.sender_number
+        # Verify client belongs to user
+        client = Client.query.join(
+            db.text('user_clients'), Client.id == db.text('user_clients.client_id')
         ).filter(
-            Message.profile_id.in_(profile_ids),
-            or_(
-                Client.phone_number.contains(query),
-                Client.name.ilike(f'%{query}%'),
-                Client.email.ilike(f'%{query}%')
-            )
-        ).distinct()
+            Client.id == client_id,
+            db.text('user_clients.user_id') == user_id
+        ).first()
         
-        # Paginate
-        result = search_query.paginate(page=page, per_page=per_page, error_out=False)
+        if not client:
+            return jsonify({'error': 'Client not found'}), 404
         
-        clients = []
-        for client in result.items:
-            client_data = client.to_dict()
-            
-            # Add which profiles this client has contacted
-            contacted_profiles = db.session.query(Profile.id, Profile.name).join(
-                Message, Profile.id == Message.profile_id
-            ).filter(
-                Message.sender_number == client.phone_number,
-                Profile.user_id == user_id
-            ).distinct().all()
-            
-            client_data['contacted_profiles'] = [
-                {'id': p.id, 'name': p.name} for p in contacted_profiles
-            ]
-            
-            clients.append(client_data)
+        # Get pagination parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 50, type=int), 100)
+        
+        # Get messages
+        messages_query = Message.query.filter(
+            Message.client_id == client_id,
+            Message.user_id == user_id
+        ).order_by(Message.timestamp.desc())
+        
+        result = messages_query.paginate(page=page, per_page=per_page, error_out=False)
+        
+        # Mark messages as read
+        unread_messages = Message.query.filter(
+            Message.client_id == client_id,
+            Message.user_id == user_id,
+            Message.direction == 'inbound',
+            Message.is_read == False
+        ).all()
+        
+        for msg in unread_messages:
+            msg.mark_as_read()
+        
+        if unread_messages:
+            db.session.commit()
         
         return jsonify({
-            'clients': clients,
-            'search_query': query,
+            'success': True,
+            'messages': [msg.to_dict(include_client_info=False) for msg in result.items],
+            'client': client.to_dict(user_id=user_id),
             'pagination': {
                 'page': page,
                 'per_page': per_page,
@@ -451,5 +384,52 @@ def search_clients():
         }), 200
         
     except Exception as e:
-        current_app.logger.error(f"Error searching clients: {str(e)}")
-        return jsonify({'error': 'Failed to search clients'}), 500
+        current_app.logger.error(f"Error getting client messages: {str(e)}")
+        return jsonify({'error': 'Failed to get client messages'}), 500
+
+
+@clients_bp.route('/stats', methods=['GET'])
+@jwt_required()
+def get_client_stats():
+    """Get client statistics for the user"""
+    try:
+        user_id = get_jwt_identity()
+        
+        # Get all clients for user
+        all_clients = Client.get_user_clients(user_id, active_only=False)
+        active_clients = Client.get_user_clients(user_id, active_only=True)
+        
+        # Count by type
+        new_clients = [c for c in all_clients if c.client_type == 'new']
+        regular_clients = [c for c in all_clients if c.client_type == 'regular']
+        vip_clients = [c for c in all_clients if c.client_type == 'vip']
+        blocked_clients = [c for c in all_clients if c.is_blocked]
+        
+        # Recent activity (last 7 days)
+        week_ago = datetime.utcnow() - timedelta(days=7)
+        recent_clients = [c for c in all_clients if c.last_contact > week_ago]
+        
+        # Message stats
+        total_messages = Message.query.filter(Message.user_id == user_id).count()
+        today_messages = Message.get_daily_count(user_id)
+        unread_messages = Message.count_unread(user_id)
+        
+        return jsonify({
+            'success': True,
+            'stats': {
+                'total_clients': len(all_clients),
+                'active_clients': len(active_clients),
+                'new_clients': len(new_clients),
+                'regular_clients': len(regular_clients),
+                'vip_clients': len(vip_clients),
+                'blocked_clients': len(blocked_clients),
+                'recent_activity': len(recent_clients),
+                'total_messages': total_messages,
+                'today_messages': today_messages,
+                'unread_messages': unread_messages
+            }
+        }), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Error getting client stats: {str(e)}")
+        return jsonify({'error': 'Failed to get client statistics'}), 500

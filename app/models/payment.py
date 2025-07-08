@@ -1,7 +1,4 @@
 # app/models/payment.py
-"""
-Database models for payments and payment methods
-"""
 
 from app.extensions import db
 from datetime import datetime

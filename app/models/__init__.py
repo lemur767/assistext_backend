@@ -1,47 +1,22 @@
+# app/models/__init__.py
+
+
 from app.extensions import db
-from .user import User
-from .message import Message
+
+# Import all models to ensure they're registered with SQLAlchemy
+from .user import User, user_clients
 from .client import Client
-from .billing import (
-    Subscription, 
-    SubscriptionPlan, 
-    Invoice, 
-    InvoiceItem, 
-    PaymentMethod
-)
-from .auto_reply import AutoReply
-from .text_example import TextExample
-from .ai_model_settings import AIModelSettings
-from .flagged_message import FlaggedMessage
+from .message import Message, FlaggedMessage
 
 
-# Export only what we're actually importing
+
+# Export models for easy importing
 __all__ = [
+    'db',
     'User',
+    'Client', 
     'Message',
-    'Client',
-    'Subscription',
-    'SubscriptionPlan',
-    'AutoReply',
-    'TextExample',
-    'AIModelSettings',
     'FlaggedMessage',
-    'Invoice',
-    'InvoiceItem',
-    'PaymentMethod'
-    
+    'user_clients'
 ]
-
-
-def clear_metadata_if_needed():
-    """Clear metadata if there are table conflicts"""
-    if hasattr(db.metadata, '_tables'):
-        # Only clear if we detect a conflict
-        table_names = list(db.metadata.tables.keys())
-        if len(table_names) != len(set(table_names)):
-            print("⚠️  Detected duplicate table names, clearing metadata...")
-            db.metadata.clear()
-
-# Call this during import
-clear_metadata_if_needed()
 
