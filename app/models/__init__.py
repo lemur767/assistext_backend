@@ -2,7 +2,8 @@ from .user import User
 from .message import Message
 from .client import Client
 from .subscription import Subscription, SubscriptionPlan
-from .billing import Invoice, PaymentMethod, UsageRecord
+from .billing import Invoice, PaymentMethod
+from .usage import UsageRecord
 from .utility import NotificationLog, ActivityLog, MessageTemplate
 
 # Import db for relationships

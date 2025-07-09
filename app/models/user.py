@@ -104,7 +104,7 @@ class User(db.Model):
     subscriptions = db.relationship('Subscription', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
     invoices = db.relationship('Invoice', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
     payment_methods = db.relationship('PaymentMethod', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
-    usage_records = db.relationship('UsageRecord', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
+    usage_records = db.relationship('Usage', back_populates='user', lazy='dynamic')
     notification_logs = db.relationship('NotificationLog', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
     activity_logs = db.relationship('ActivityLog', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
     message_templates = db.relationship('MessageTemplate', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
