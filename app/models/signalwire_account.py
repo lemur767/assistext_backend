@@ -67,8 +67,8 @@ class SignalWirePhoneNumber(db.Model):
     assigned_at = db.Column(db.DateTime)
     
     # Relationships
-    account = db.relationship('SignalWireAccount', back_populates='phone_numbers')
-    profile = db.relationship('Profile', backref='signalwire_phone_number')
+    account = db.relationship('SignalWireAccount', back_populates='phone_number')
+ 
     
     def get_capabilities(self):
         if not self.capabilities:

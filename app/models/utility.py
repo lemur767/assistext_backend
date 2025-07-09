@@ -177,3 +177,40 @@ class NotificationLog(db.Model):
             'error_message': self.error_message,
             'created_at': self.created_at.isoformat()
         }
+class MessageTemplate(db.Model):
+    __tablename__ = 'message_templates'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # ✅ FIXED: Proper foreign key reference
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    
+    name = db.Column(db.String(100), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    category = db.Column(db.String(50))  # greeting, info, pricing, etc.
+    is_active = db.Column(db.Boolean, default=True)
+    usage_count = db.Column(db.Integer, default=0)
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # ✅ FIXED: Proper back_populates reference
+    user = db.relationship('User', back_populates='message_templates')
+    
+    def increment_usage(self):
+        """Increment usage count"""
+        self.usage_count += 1
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'name': self.name,
+            'content': self.content,
+            'category': self.category,
+            'is_active': self.is_active,
+            'usage_count': self.usage_count,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat()
+        }

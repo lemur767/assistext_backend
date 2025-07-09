@@ -99,14 +99,16 @@ class User(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
  
-    messages = db.relationship('Message', back_populates='user', lazy='dynamic')
+    messages = db.relationship('Message', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
+    clients = db.relationship('Client', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
+    subscriptions = db.relationship('Subscription', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
+    invoices = db.relationship('Invoice', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
+    payment_methods = db.relationship('PaymentMethod', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
+    usage_records = db.relationship('UsageRecord', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
+    notification_logs = db.relationship('NotificationLog', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
+    activity_logs = db.relationship('ActivityLog', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
+    message_templates = db.relationship('MessageTemplate', back_populates='user', lazy='dynamic', cascade='all, delete-orphan')
     
-    # FIXED: Only define clients relationship if table exists and is properly configured
-    try:
-        clients = db.relationship('Client', secondary=user_clients, back_populates='user', lazy='dynamic')
-    except Exception:
-        # If there's an issue with the relationship, define it without secondary for now
-        pass
 
     def __init__(self, **kwargs):
         super(User, self).__init__(**kwargs)

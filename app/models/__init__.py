@@ -1,48 +1,16 @@
-# app/models/__init__.py
-
-from app.extensions import db
-
-# Import current models (post-consolidation)
 from .user import User
 from .message import Message
 from .client import Client
+from .subscription import Subscription, SubscriptionPlan
+from .billing import Invoice, PaymentMethod, UsageRecord
+from .utility import NotificationLog, ActivityLog, MessageTemplate
 
-# Optional models
-try:
-    from .billing import Subscription
-except ImportError:
-    Subscription = None
-try:
-    from .billing import SubscriptionPlan
-except ImportError:
-    SubscriptionPlan = None
-try:
-    from .signalwire import (
-        SignalWireAccount,
-        SignalWirePhoneNumber
-    )
-except ImportError:
-    SignalWireAccount = None
-    SignalWirePhoneNumber = None
-try:
-    from .message import FlaggedMessage
-except ImportError:
-    FlaggedMessage = None
+# Import db for relationships
+from app.extensions import db
 
-# Export models
+# Export all models
 __all__ = [
-    'db',
-    'User',
-    'Message', 
-    'Client'
+    'User', 'Message', 'Client', 'Subscription', 'SubscriptionPlan',
+    'Invoice', 'PaymentMethod', 'UsageRecord', 'NotificationLog', 
+    'ActivityLog', 'MessageTemplate', 'db'
 ]
-if SignalWirePhoneNumber:
-    __all__.append('SignalWireNumber')
-if SignalWireAccount:
-    __all__.append('SignalWireAccount')
-if SubscriptionPlan:
-    __all__.append('SubscriptionPlan')
-if Subscription:
-    __all__.append('Subscription')
-if FlaggedMessage:
-    __all__.append('FlaggedMessage')

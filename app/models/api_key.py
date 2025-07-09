@@ -17,7 +17,7 @@ class APIKey(db.Model):
     last_used_at = db.Column(db.DateTime, nullable=True)
     
     # Relationships
-    user = db.relationship('User', backref=db.backref('api_keys', lazy='dynamic'))
+    users = db.relationship('User', backref=db.backref('api_key', lazy='dynamic'))
     
     def __repr__(self):
         return f'<APIKey {self.name}>'

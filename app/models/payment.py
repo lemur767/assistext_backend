@@ -41,7 +41,7 @@ class PaymentMethod(db.Model):
     
     # Relationships
     user = db.relationship('User', backref='payment_methods')
-    payments = db.relationship('Payment', backref='payment_method', lazy='dynamic')
+    payment = db.relationship('Payment', backref='payment_methods', lazy='dynamic')
     
     def to_dict(self):
         return {

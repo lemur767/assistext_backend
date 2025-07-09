@@ -1,21 +1,17 @@
-"""
-Fixed Extensions with SocketIO Issue Resolution
-app/extensions.py - Resolves SocketIO import conflicts
-"""
 import os
 import logging
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
-from flask_mail import Mail
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+from flask_socketio import SocketIO
+from celery import Celery
 
-# Initialize core extensions that always work
 db = SQLAlchemy()
 migrate = Migrate()
 jwt = JWTManager()
-mail = Mail()
+socketio = SocketIO()
 
 # Initialize rate limiter
 limiter = Limiter(
@@ -41,9 +37,7 @@ redis_client = None
 celery = None
 
 def make_celery(app=None):
-    """
-    Create and configure Celery instance with error handling
-    """
+
     global celery
     
     try:
@@ -114,7 +108,7 @@ def make_celery(app=None):
         return None
 
 def init_redis():
-    """Initialize Redis connection with error handling"""
+    
     global redis_client
     try:
         import redis
@@ -131,10 +125,8 @@ def init_redis():
         return None
 
 def init_extensions(app):
-    """
-    Initialize all Flask extensions with app
-    Includes error handling for optional extensions
-    """
+  
+   
     global celery, redis_client
     
     # Initialize core extensions (these must work)

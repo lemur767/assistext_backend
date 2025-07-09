@@ -41,7 +41,7 @@ class SubscriptionPlan(db.Model):
     metadata = db.Column(db.JSON)
     
     # Relationships
-    subscriptions = db.relationship('Subscription', backref='plan', lazy='dynamic')
+    subscriptions = db.relationship('Subscription', back_populates='plan', lazy='dynamic')
     
     def to_dict(self):
         return {
@@ -107,10 +107,10 @@ class Subscription(db.Model):
     metadata = db.Column(db.JSON)
     
     # Relationships
-    user = db.relationship('User', backref='subscriptions')
-    payments = db.relationship('Payment', backref='subscription', lazy='dynamic')
-    invoices = db.relationship('Invoice', backref='subscription', lazy='dynamic')
-    usage_records = db.relationship('Usage', backref='subscription', lazy='dynamic')
+    user = db.relationship('User', back_populates='subscriptions')
+    plan = db.relationship('SubscriptionPlan', back_populates='subscriptions')
+    invoices = db.relationship('Invoice', back_populates='subscription', lazy='dynamic')
+    
     
     def to_dict(self, include_relationships=False):
         data = {

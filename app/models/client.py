@@ -31,9 +31,8 @@ class Client(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Relationships (UPDATED: Many-to-many with users instead of profiles)
-    user = db.relationship('User', secondary='user_clients', back_populates='clients', lazy='dynamic')
-    messages = db.relationship('Message', back_populates='clients', lazy='dynamic')
+    user = db.relationship('User', back_populates='clients')
+    messages = db.relationship('Message', back_populates='client', lazy='dynamic', cascade='all, delete-orphan')
     
     def __init__(self, **kwargs):
         super(Client, self).__init__(**kwargs)
