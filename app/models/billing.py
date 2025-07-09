@@ -50,7 +50,7 @@ class SubscriptionPlan(db.Model):
             'price_yearly': float(self.price_yearly) if self.price_yearly else None,
             'stripe_price_id_monthly': self.stripe_price_id_monthly,
             'stripe_price_id_yearly': self.stripe_price_id_yearly,
-            'max_profiles': self.max_profiles,
+           
             'max_ai_responses_per_month': self.max_ai_responses_per_month,
             'message_retention_days': self.message_retention_days,
             'features': self.get_features(),
@@ -79,7 +79,7 @@ class Subscription(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Usage tracking
-    profiles_used = db.Column(db.Integer, default=0)
+  
     ai_responses_used = db.Column(db.Integer, default=0)
     monthly_ai_responses_used = db.Column(db.Integer, default=0)
     last_usage_reset = db.Column(db.DateTime, default=datetime.utcnow)
@@ -145,11 +145,8 @@ class Subscription(db.Model):
     def get_usage_limits(self):
         """Get current usage limits for this subscription"""
         return {
-            'max_profiles': self.plan.max_profiles,
             'max_ai_responses': self.plan.max_ai_responses_per_month,
-            'profiles_used': self.profiles_used,
             'ai_responses_used': self.monthly_ai_responses_used,
-            'profiles_remaining': max(0, self.plan.max_profiles - self.profiles_used),
             'ai_responses_remaining': max(0, self.plan.max_ai_responses_per_month - self.monthly_ai_responses_used) if self.plan.max_ai_responses_per_month else None
         }
 

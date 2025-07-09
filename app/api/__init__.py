@@ -1,43 +1,38 @@
+# app/api/__init__.py
 
+import logging
 
-from flask import Blueprint
-
-# List of all available blueprints with their URL prefixes
-BLUEPRINT_CONFIGS = [
-    ('auth', '/api/auth'),
-    ('messages', '/api/messages'),
-    ('webhooks', '/api/webhooks'),
-    ('billing', '/api/billing'),
-    ('user_profile','api/user/profile')
-    ('signalwire', '/api/signalwire'),
-]
-
-def get_blueprint_by_name(name):
-    """Get a blueprint by its name using lazy import."""
-    blueprint_map = {
-        'auth': lambda: __import__('app.api.auth', fromlist=['auth_bp']).auth_bp,
-        'messages': lambda: __import__('app.api.messages', fromlist=['messages_bp']).messages_bp,
-        'webhooks': lambda: __import__('app.api.webhooks', fromlist=['webhooks_bp']).webhooks_bp,
-        'billing': lambda: __import__('app.api.billing', fromlist=['billing_bp']).billing_bp,
-        'user_profile': lambda: __import__('app.api.user_profile', fromlist=['user_profile_bp']).user_profile_bp,
-        'signalwire': lambda: __import__('app.api.signalwire', fromlist=['signalwire_bp']).signalwire_bp
-    }
-    if name in blueprint_map:
-        return blueprint_map[name]()
-    return None
+logger = logging.getLogger(__name__)
 
 def register_blueprints(app):
-    """Register all blueprints with the Flask application."""
-    for blueprint_name, url_prefix in BLUEPRINT_CONFIGS:
-        blueprint = get_blueprint_by_name(blueprint_name)
-        if blueprint:
-            app.register_blueprint(blueprint, url_prefix=url_prefix)
-        
-    # Log registered blueprints
-    app.logger.info(f"Registered {len(BLUEPRINT_CONFIGS)} API blueprints")
-
-__all__ = [
-    'BLUEPRINT_CONFIGS',
-    'register_blueprints',
-    'get_blueprint_by_name',
-]
+    """Register API blueprints for consolidated one-user-one-profile system"""
+    
+    registered = 0
+    
+    # Current API endpoints (post-consolidation)
+    blueprints = [
+        ('app.api.auth', 'auth_bp', '/api/auth'),
+        ('app.api.profile', 'profile_bp', '/api/profile'),  # Single profile, not profiles
+        ('app.api.messages', 'messages_bp', '/api/messages'),
+        ('app.api.clients', 'clients_bp', '/api/clients'),
+        ('app.api.webhooks', 'webhooks_bp', '/api/webhooks'),
+        ('app.api.billing', 'billing_bp', '/api/billing'),
+    ]
+    
+    for module_name, blueprint_name, url_prefix in blueprints:
+        try:
+            module = __import__(module_name, fromlist=[blueprint_name])
+            if hasattr(module, blueprint_name):
+                blueprint = getattr(module, blueprint_name)
+                app.register_blueprint(blueprint, url_prefix=url_prefix)
+                logger.info(f"✅ {blueprint_name} registered at {url_prefix}")
+                registered += 1
+            else:
+                logger.warning(f"⚠️  {blueprint_name} not found in {module_name}")
+        except ImportError as e:
+            logger.warning(f"⚠️  Could not import {blueprint_name}: {e}")
+        except Exception as e:
+            logger.error(f"❌ Error registering {blueprint_name}: {e}")
+    
+    logger.info(f"📊 Total blueprints registered: {registered}")
+    return registered

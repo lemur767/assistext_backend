@@ -1,6 +1,4 @@
-"""
-Database model for billing settings
-"""
+
 
 from app.extensions import db
 from datetime import datetime

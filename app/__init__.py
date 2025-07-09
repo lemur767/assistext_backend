@@ -128,7 +128,7 @@ def register_blueprints(app):
                 blueprint = getattr(module, blueprint_name)
                 
                 # Register the blueprint
-                app.register_blueprint(blueprint, url_prefix=url_prefix)
+                app.register_blueprints(blueprint, url_prefix=url_prefix)
                 logger.info(f"✅ {blueprint_name} registered at {url_prefix}")
                 blueprints_registered += 1
             else:
