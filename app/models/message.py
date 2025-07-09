@@ -38,7 +38,7 @@ class Message(db.Model):
     
     # Relationships (UPDATED)
     user = db.relationship('User', back_populates='messages')
-    client = db.relationship('Client', back_populates='messages')
+    clients = db.relationship('Client', back_populates='messages')
     
     def __init__(self, **kwargs):
         super(Message, self).__init__(**kwargs)

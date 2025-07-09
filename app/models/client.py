@@ -33,7 +33,7 @@ class Client(db.Model):
     
     # Relationships (UPDATED: Many-to-many with users instead of profiles)
     user = db.relationship('User', secondary='user_clients', back_populates='clients', lazy='dynamic')
-    message = db.relationship('Message', back_populates='clients', lazy='dynamic')
+    messages = db.relationship('Message', back_populates='clients', lazy='dynamic')
     
     def __init__(self, **kwargs):
         super(Client, self).__init__(**kwargs)
