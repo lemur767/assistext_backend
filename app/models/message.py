@@ -37,8 +37,8 @@ class Message(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships (UPDATED)
-    user = db.relationship('User', back_populates='messages')
-    client = db.relationship('Client', back_populates='messages')
+    user = db.relationship('User', back_populates='message')
+    client = db.relationship('Client', back_populates='message')
     
     def __init__(self, **kwargs):
         super(Message, self).__init__(**kwargs)
