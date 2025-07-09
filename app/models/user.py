@@ -99,7 +99,7 @@ class User(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
  
-    message = db.relationship('Message', backref='user', lazy='dynamic')
+    message = db.relationship('Message', back_populates='user', lazy='dynamic')
     
     # FIXED: Only define clients relationship if table exists and is properly configured
     try:
