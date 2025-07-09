@@ -9,7 +9,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models.user import User
 from app.models.subscription import Subscription, SubscriptionPlan
 from app.models.payment import Payment, PaymentMethod, Invoice
-from app.models.usage import Usage, UsageMetric
+from app.models.usage import Usage 
 from app.models.billing_settings import BillingSettings
 from app.extensions import db
 from app.services.payment_processor import PaymentProcessor
@@ -422,7 +422,7 @@ def process_payment():
             currency=data['currency'],
             payment_method_id=payment_method.id,
             description=data.get('description', 'Payment'),
-            metadata=data.get('metadata', {})
+            pm_metadata=data.get('pm_metadata', {})
         )
         
         if not payment_result['success']:
@@ -437,7 +437,7 @@ def process_payment():
             status='succeeded',
             processor_id=payment_result['processor_id'],
             description=data.get('description'),
-            metadata=data.get('metadata'),
+            pay_metadata=data.get('pay_metadata'),
             processed_at=datetime.utcnow()
         )
         

@@ -10,15 +10,12 @@ import re
 
 auth_bp = Blueprint('auth', __name__)
 
-# UPDATED: Registration now sets up complete user profile in one step
+
 
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
-    """
-    Register new user with integrated profile setup
-    UPDATED: Creates complete user profile in one step instead of separate user + profile
-    """
+  
     try:
         data = request.get_json()
         if not data:
@@ -88,9 +85,7 @@ def register():
         if 'auto_reply_keywords' in data:
             user.set_auto_reply_keywords(data['auto_reply_keywords'])
         
-        # Set text examples if provided
-        if 'text_examples' in data:
-            user.set_text_examples(data['text_examples'])
+    
         
         db.session.add(user)
         db.session.commit()

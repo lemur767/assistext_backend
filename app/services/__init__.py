@@ -1,7 +1,4 @@
-"""
-Business logic services package initialization.
-This file imports all service modules for easy access.
-"""
+
 
 # Import service functions without circular imports
 def get_message_handler():
@@ -55,25 +52,14 @@ def get_billing_service():
         'create_checkout_session': create_checkout_session
     }
 
-def get_analytics_service():
-    """Lazy import analytics service to avoid circular imports"""
-    from app.services.analytics_service import AnalyticsService
-    return AnalyticsService
 
-def get_twilio_service():
-    """Lazy import Twilio service to avoid circular imports"""
-    from app.services.twilio_service import TwilioService
-    return TwilioService
+
+
 
 class ServiceManager:
     """Manager class for all services."""
     
-    @staticmethod
-    def get_analytics():
-        """Get the analytics service instance."""
-        analytics_cls = get_analytics_service()
-        return analytics_cls()
-    
+   
     @staticmethod
     def get_message_handler():
         """Get message handler functions."""
@@ -88,9 +74,4 @@ class ServiceManager:
     def get_billing_service():
         """Get billing service functions."""
         return get_billing_service()
-    
-    @staticmethod
-    def get_twilio_service(user=None):
-        """Get Twilio service instance."""
-        twilio_cls = get_twilio_service()
-        return twilio_cls(user)
+ 
