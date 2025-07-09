@@ -1,7 +1,3 @@
-"""
-SignalWire Utilities and Helper Functions
-app/utils/signalwire_helpers.py - Utility functions for SignalWire integration
-"""
 import os
 import hmac
 import hashlib

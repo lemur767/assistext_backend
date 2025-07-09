@@ -36,8 +36,10 @@ __all__ = [
     'Message', 
     'Client'
 ]
-
-
+if SignalWirePhoneNumber:
+    __all__.append('SignalWireNumber')
+if SignalWireAccount:
+    __all__.append('SignalWireAccount')
 if SubscriptionPlan:
     __all__.append('SubscriptionPlan')
 if Subscription:

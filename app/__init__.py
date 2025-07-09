@@ -9,14 +9,14 @@ from app.extensions import db, migrate, jwt
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def create_app(config_name=None):
+def create_app(config_name='production'):
        
     # Create Flask app
     app = Flask(__name__)
     
     # Load configuration
     if config_name is None:
-        config_name = os.getenv('FLASK_ENV', 'development')
+        config_name = os.getenv('FLASK_ENV', 'production')
     
     config = get_config(config_name)
     app.config.from_object(config)
@@ -109,7 +109,7 @@ def register_blueprints(app):
     
     # Updated blueprints (new structure)
     updated_blueprints = [
-        ('app.api.profile', 'profile_bp', '/api/profile', False),  # NEW: Single profile endpoint
+        ('app.api.user_profile', 'user_profile_bp', '/api/user/profile', False),  # NEW: Single profile endpoint
         ('app.api.clients', 'clients_bp', '/api/clients', False),
         ('app.api.messages', 'messages_bp', '/api/messages', False),
     ]

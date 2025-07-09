@@ -90,8 +90,7 @@ def update_user_profile():
             user.ai_max_tokens = int(data['ai_max_tokens'])
         
         # Update text examples
-        if 'text_examples' in data:
-            user.set_text_examples(data['text_examples'])
+      
         
         db.session.commit()
         
@@ -211,7 +210,7 @@ def get_ai_settings():
         return jsonify({
             'success': True,
             'ai_settings': user.get_ai_settings(),
-            'text_examples': user.get_text_examples()
+            
         }), 200
         
     except Exception as e:
@@ -261,20 +260,14 @@ def update_ai_settings():
             else:
                 return jsonify({'error': 'Max tokens must be between 1 and 1000'}), 400
         
-        # Update text examples
-        if 'text_examples' in data:
-            if isinstance(data['text_examples'], list):
-                user.set_text_examples(data['text_examples'])
-            else:
-                return jsonify({'error': 'Text examples must be a list'}), 400
-        
+       
         db.session.commit()
         
         return jsonify({
             'success': True,
             'message': 'AI settings updated successfully',
             'ai_settings': user.get_ai_settings(),
-            'text_examples': user.get_text_examples()
+          
         }), 200
         
     except Exception as e:

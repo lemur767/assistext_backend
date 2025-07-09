@@ -1,8 +1,9 @@
 
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models.user import User
 from app.extensions import db
+#from app.utils.signalwire_helpers import get_signalwire_client, seac
 from marshmallow import Schema, fields, validate, ValidationError
 import logging
 
@@ -60,7 +61,7 @@ class SignalWireSettingsSchema(Schema):
 # PROFILE ENDPOINTS
 # =============================================================================
 
-@user_profile_bp.route('/profile', methods=['GET'])
+@user_profile_bp.route('/', methods=['GET'])
 @jwt_required()
 def get_user_profile():
     """Get the current user's profile information"""
@@ -80,7 +81,7 @@ def get_user_profile():
         logger.error(f"Error getting user profile: {str(e)}")
         return jsonify({'error': 'Failed to retrieve user profile'}), 500
 
-@user_profile_bp.route('/profile', methods=['PUT'])
+@user_profile_bp.route('/', methods=['PUT'])
 @jwt_required()
 def update_user_profile():
     """Update the current user's profile information"""
@@ -461,6 +462,7 @@ def update_signalwire_settings():
         logger.error(f"Error updating SignalWire settings: {str(e)}")
         db.session.rollback()
         return jsonify({'error': 'Failed to update SignalWire settings'}), 500
+    
 
 # =============================================================================
 # ACCOUNT MANAGEMENT
