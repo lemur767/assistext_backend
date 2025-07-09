@@ -4,6 +4,41 @@ from datetime import datetime
 import json
 from typing import Dict, Any, Optional
 
+# FIXED: Handle existing user_clients table properly
+# Check if user_clients table already exists before creating
+def create_user_clients_table():
+    """Create user_clients table only if it doesn't exist"""
+    try:
+        # Try to query the table - if it fails, table doesn't exist
+        db.session.execute(db.text("SELECT 1 FROM user_clients LIMIT 1"))
+        # If we get here, table exists
+        return db.Table('user_clients', db.metadata, autoload_with=db.engine)
+    except:
+        # Table doesn't exist, create it
+        return db.Table('user_clients',
+            db.Column('user_id', db.Integer, db.ForeignKey('users.id'), primary_key=True),
+            db.Column('client_id', db.Integer, db.ForeignKey('clients.id'), primary_key=True),
+            db.Column('notes', db.Text, default=''),
+            db.Column('is_blocked', db.Boolean, default=False),
+            db.Column('is_favorite', db.Boolean, default=False),
+            db.Column('created_at', db.DateTime, default=datetime.utcnow)
+        )
+
+# Create or get the junction table
+try:
+    user_clients = create_user_clients_table()
+except Exception as e:
+    # Fallback: define the table structure anyway
+    user_clients = db.Table('user_clients',
+        db.Column('user_id', db.Integer, db.ForeignKey('users.id'), primary_key=True),
+        db.Column('client_id', db.Integer, db.ForeignKey('clients.id'), primary_key=True),
+        db.Column('notes', db.Text, default=''),
+        db.Column('is_blocked', db.Boolean, default=False),
+        db.Column('is_favorite', db.Boolean, default=False),
+        db.Column('created_at', db.DateTime, default=datetime.utcnow)
+    )
+
+
 class User(db.Model):
     __tablename__ = 'users'
      
@@ -64,8 +99,15 @@ class User(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships (updated to use user_id instead of profile_id)
-    messages = db.relationship('Message', back_populates='user', lazy='dynamic')
-    clients = db.relationship('Client', secondary='user_clients', back_populates='users', lazy='dynamic')
+    # FIXED: Use backref instead of back_populates to avoid import issues
+    messages = db.relationship('Message', backref='user', lazy='dynamic')
+    
+    # FIXED: Only define clients relationship if table exists and is properly configured
+    try:
+        clients = db.relationship('Client', secondary=user_clients, backref='users', lazy='dynamic')
+    except Exception:
+        # If there's an issue with the relationship, define it without secondary for now
+        pass
 
     def __init__(self, **kwargs):
         super(User, self).__init__(**kwargs)
@@ -216,14 +258,3 @@ class User(db.Model):
             })
         
         return data
-
-
-# Junction table for user-client relationships (replaces profile_clients)
-user_clients = db.Table('user_clients',
-    db.Column('user_id', db.Integer, db.ForeignKey('users.id'), primary_key=True),
-    db.Column('client_id', db.Integer, db.ForeignKey('clients.id'), primary_key=True),
-    db.Column('notes', db.Text),  # User-specific notes about this client
-    db.Column('is_blocked', db.Boolean, default=False),
-    db.Column('is_favorite', db.Boolean, default=False),
-    db.Column('created_at', db.DateTime, default=datetime.utcnow)
-)

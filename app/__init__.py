@@ -10,11 +10,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def create_app(config_name=None):
-    """
-    Flask application factory
-    UPDATED: Removed profile blueprint, added new profile blueprint for single-user profile
-    """
-    
+       
     # Create Flask app
     app = Flask(__name__)
     
@@ -26,7 +22,7 @@ def create_app(config_name=None):
     app.config.from_object(config)
     
     # Initialize extensions
-    CORS(app, origins=["http://localhost:3000", "http://localhost:5173"])  # Add your frontend URLs
+    CORS(app, origins=["http://localhost:3000", "http://localhost:5173","https://assitext.ca","https://www.assitext.ca"])  # Add your frontend URLs
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
@@ -48,7 +44,7 @@ def create_app(config_name=None):
 
 
 def setup_jwt_handlers(app):
-    """Set up JWT error handlers"""
+   
     
     @jwt.expired_token_loader
     def expired_token_callback(jwt_header, jwt_payload):
@@ -70,7 +66,7 @@ def setup_jwt_handlers(app):
 
 
 def register_error_handlers(app):
-    """Register application error handlers"""
+    
     
     @app.errorhandler(404)
     def not_found_error(error):
@@ -99,79 +95,82 @@ def register_error_handlers(app):
 
 
 def register_blueprints(app):
-    """
-    Register application blueprints
-    UPDATED: Removed profiles blueprint, added new profile blueprint for single-user profile
-    """
+   
     
-    # Core authentication routes
-    try:
-        from app.api.auth import auth_bp
-        app.register_blueprint(auth_bp, url_prefix='/api/auth')
-        logger.info("✅ Auth blueprint registered")
-    except ImportError as e:
-        logger.warning(f"Could not import auth blueprint: {e}")
-    except Exception as e:
-        logger.error(f"Error registering auth blueprint: {e}")
+    blueprints_registered = 0
     
-    
-    try:
-        from app.api.profile import profile_bp
-        app.register_blueprint(profile_bp, url_prefix='/api/profile')
-        logger.info("✅ Profile blueprint registered")
-    except ImportError as e:
-        logger.warning(f"Could not import profile blueprint: {e}")
-    except Exception as e:
-        logger.error(f"Error registering profile blueprint: {e}")
-    
-    
-    try:
-        from app.api.clients import clients_bp
-        app.register_blueprint(clients_bp, url_prefix='/api/clients')
-        logger.info("✅ Clients blueprint registered")
-    except ImportError as e:
-        logger.warning(f"Could not import clients blueprint: {e}")
-    except Exception as e:
-        logger.error(f"Error registering clients blueprint: {e}")
-    
-    # Message management routes (updated to work with user instead of profile)
-    try:
-        from app.api.messages import messages_bp
-        app.register_blueprint(messages_bp, url_prefix='/api/messages')
-        logger.info("✅ Messages blueprint registered")
-    except ImportError as e:
-        logger.warning(f"Could not import messages blueprint: {e}")
-    except Exception as e:
-        logger.error(f"Error registering messages blueprint: {e}")
-    
-    # Webhook routes (updated to find user by SignalWire phone number)
-    try:
-        from app.api.webhooks import webhooks_bp
-        app.register_blueprint(webhooks_bp, url_prefix='/api/webhooks')
-        logger.info("✅ Webhooks blueprint registered")
-    except ImportError as e:
-        logger.warning(f"Could not import webhooks blueprint: {e}")
-    except Exception as e:
-        logger.error(f"Error registering webhooks blueprint: {e}")
-    
-    # Optional blueprints (register if available)
-    optional_blueprints = [
-        ('app.api.billing', 'billing_bp', '/api/billing'),
-        ('app.api.analytics', 'analytics_bp', '/api/analytics'),
-        ('app.api.signalwire', 'signalwire_bp', '/api/signalwire'),
-        ('app.api.ai_settings', 'ai_settings_bp', '/api/ai_settings'),  # If you have separate AI settings endpoints
+    # Core blueprints (required)
+    core_blueprints = [
+        ('app.api.auth', 'auth_bp', '/api/auth', True),
+        ('app.api.webhooks', 'webhooks_bp', '/api/webhooks', True),
+        ('app.api.billing', 'billing_bp', '/api/billing', True),
+        ('app.api.signalwire', 'signalwire_bp', '/api/signalwire', True),
     ]
     
-    for module_name, blueprint_name, url_prefix in optional_blueprints:
+    # Updated blueprints (new structure)
+    updated_blueprints = [
+        ('app.api.profile', 'profile_bp', '/api/profile', False),  # NEW: Single profile endpoint
+        ('app.api.clients', 'clients_bp', '/api/clients', False),
+        ('app.api.messages', 'messages_bp', '/api/messages', False),
+    ]
+    
+        
+    # Register all blueprints
+    all_blueprints = core_blueprints + updated_blueprints
+    
+    for module_name, blueprint_name, url_prefix, is_required in all_blueprints:
         try:
+            # Import the module
             module = __import__(module_name, fromlist=[blueprint_name])
-            blueprint = getattr(module, blueprint_name)
-            app.register_blueprint(blueprint, url_prefix=url_prefix)
-            logger.info(f"✅ {blueprint_name} registered")
-        except ImportError:
-            logger.info(f"⚠️  {module_name} not available (optional)")
+            
+            # Get the blueprint object
+            if hasattr(module, blueprint_name):
+                blueprint = getattr(module, blueprint_name)
+                
+                # Register the blueprint
+                app.register_blueprint(blueprint, url_prefix=url_prefix)
+                logger.info(f"✅ {blueprint_name} registered at {url_prefix}")
+                blueprints_registered += 1
+            else:
+                logger.warning(f"⚠️  {module_name} found but {blueprint_name} not available")
+                
+        except ImportError as e:
+            if is_required:
+                logger.error(f"❌ Required blueprint {blueprint_name} could not be imported: {e}")
+            else:
+                logger.info(f"⚠️  Optional blueprint {blueprint_name} not available: {e}")
+                
         except Exception as e:
-            logger.warning(f"Error registering {blueprint_name}: {e}")
+            if is_required:
+                logger.error(f"❌ Error registering required blueprint {blueprint_name}: {e}")
+            else:
+                logger.warning(f"⚠️  Error registering optional blueprint {blueprint_name}: {e}")
+    
+    logger.info(f"📊 Total blueprints registered: {blueprints_registered}")
+    
+    # Add health check endpoint
+    @app.route('/api/health')
+    def health_check():
+        return {
+            'status': 'healthy',
+            'blueprints_registered': blueprints_registered,
+            'timestamp': app.config.get('START_TIME', 'unknown')
+        }
+    
+    return blueprints_registered
+
+
+# Legacy function for compatibility (if needed)
+def get_blueprint_by_name(name):
+    """
+    Legacy function - kept for compatibility
+    Returns None instead of causing tuple errors
+    """
+    logger.warning(f"get_blueprint_by_name({name}) called - this function is deprecated")
+    return None
+
+
+# List available blueprints for introspection
 
 
 def setup_database(app):
@@ -244,10 +243,23 @@ def create_app_with_health_checks(config_name=None):
     app = create_app(config_name)
     add_health_check(app)
     return app
+AVAILABLE_BLUEPRINTS = [
+    'auth_bp',
+    'profile_bp', 
+    'clients_bp',
+    'messages_bp',
+    'webhooks_bp'
+]
+
+__all__ = [
+    'register_blueprints',
+    'get_blueprint_by_name',
+    'AVAILABLE_BLUEPRINTS'
+]
 
 
 if __name__ == '__main__':
     # For development server
-    app = create_app('development')
+    app = create_app('production')
     add_health_check(app)
     app.run(debug=True, host='0.0.0.0', port=5000)
