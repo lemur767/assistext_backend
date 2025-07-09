@@ -8,9 +8,9 @@ class Invoice(db.Model):
     """Invoice model"""
     __tablename__ = 'invoices'
     
-    id = db.Column(db.String(50), primary_key=True)
-    user_id = db.Column(db.String(50), db.ForeignKey('users.id'), nullable=False)
-    subscription_id = db.Column(db.String(50), db.ForeignKey('subscriptions.id'))
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    subscription_id = db.Column(db.Integer), db.ForeignKey('subscriptions.id'))
     
     # Invoice details
     invoice_number = db.Column(db.String(50), unique=True, nullable=False)

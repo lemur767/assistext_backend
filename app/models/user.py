@@ -4,41 +4,6 @@ from datetime import datetime
 import json
 from typing import Dict, Any, Optional
 
-# FIXED: Handle existing user_clients table properly
-# Check if user_clients table already exists before creating
-def create_user_clients_table():
-    """Create user_clients table only if it doesn't exist"""
-    try:
-        # Try to query the table - if it fails, table doesn't exist
-        db.session.execute(db.text("SELECT 1 FROM user_clients LIMIT 1"))
-        # If we get here, table exists
-        return db.Table('user_clients', db.metadata, autoload_with=db.engine)
-    except:
-        # Table doesn't exist, create it
-        return db.Table('user_clients',
-            db.Column('user_id', db.Integer, db.ForeignKey('users.id'), primary_key=True),
-            db.Column('client_id', db.Integer, db.ForeignKey('clients.id'), primary_key=True),
-            db.Column('notes', db.Text, default=''),
-            db.Column('is_blocked', db.Boolean, default=False),
-            db.Column('is_favorite', db.Boolean, default=False),
-            db.Column('created_at', db.DateTime, default=datetime.utcnow)
-        )
-
-# Create or get the junction table
-try:
-    user_clients = create_user_clients_table()
-except Exception as e:
-    # Fallback: define the table structure anyway
-    user_clients = db.Table('user_clients',
-        db.Column('user_id', db.Integer, db.ForeignKey('users.id'), primary_key=True),
-        db.Column('client_id', db.Integer, db.ForeignKey('clients.id'), primary_key=True),
-        db.Column('notes', db.Text, default=''),
-        db.Column('is_blocked', db.Boolean, default=False),
-        db.Column('is_favorite', db.Boolean, default=False),
-        db.Column('created_at', db.DateTime, default=datetime.utcnow)
-    )
-
-
 class User(db.Model):
     __tablename__ = 'users'
      

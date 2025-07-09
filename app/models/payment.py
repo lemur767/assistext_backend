@@ -7,8 +7,8 @@ class PaymentMethod(db.Model):
     """Payment method model"""
     __tablename__ = 'payment_methods'
     
-    id = db.Column(db.String(50), primary_key=True)
-    user_id = db.Column(db.String(50), db.ForeignKey('users.id'), nullable=False)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     
     # Payment method details
     type = db.Column(db.String(20), nullable=False)  # card, bank, paypal, etc.
@@ -68,11 +68,11 @@ class Payment(db.Model):
     """Payment model"""
     __tablename__ = 'payments'
     
-    id = db.Column(db.String(50), primary_key=True)
-    user_id = db.Column(db.String(50), db.ForeignKey('users.id'), nullable=False)
-    subscription_id = db.Column(db.String(50), db.ForeignKey('subscriptions.id'))
-    invoice_id = db.Column(db.String(50), db.ForeignKey('invoices.id'))
-    payment_method_id = db.Column(db.String(50), db.ForeignKey('payment_methods.id'))
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    subscription_id = db.Column(db.Integer, db.ForeignKey('subscriptions.id'))
+    invoice_id = db.Column(db.Integer), db.ForeignKey('invoices.id'))
+    payment_method_id = db.Column(db.Integer, db.ForeignKey('payment_methods.id'))
     
     # Payment details
     amount = db.Column(db.Numeric(10, 2), nullable=False)

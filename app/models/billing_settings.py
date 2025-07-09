@@ -7,8 +7,8 @@ class BillingSettings(db.Model):
     """Billing settings model"""
     __tablename__ = 'billing_settings'
     
-    id = db.Column(db.String(50), primary_key=True)
-    user_id = db.Column(db.String(50), db.ForeignKey('users.id'), nullable=False, unique=True)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True)
     
     # Billing preferences
     auto_pay = db.Column(db.Boolean, default=True)

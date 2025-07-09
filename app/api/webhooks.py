@@ -1,14 +1,14 @@
 from flask import Blueprint, request, jsonify, current_app
 from app.models.user import User
 from app.models.client import Client
-from app.models.message import Message, FlaggedMessage
+from app.models.message import Message
 from app.extensions import db
 from datetime import datetime
 import logging
 
 webhooks_bp = Blueprint('webhooks', __name__)
 
-# UPDATED: Find users by SignalWire phone number instead of profiles
+
 
 
 def validate_signalwire_signature():

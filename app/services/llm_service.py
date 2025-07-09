@@ -19,18 +19,7 @@ class LLMService:
         
     def generate_response(self, profile, message: str, sender_number: str,
                          conversation_history: List = None) -> Optional[str]:
-        """
-        Generate AI response for an incoming message.
-        
-        Args:
-            profile: Profile object for the recipient
-            message: Incoming message text
-            sender_number: Phone number of sender
-            conversation_history: Recent conversation history
-            
-        Returns:
-            Generated response text or None if failed
-        """
+     
         try:
             # Prepare the prompt
             prompt = self._create_prompt(profile, message, sender_number, conversation_history)

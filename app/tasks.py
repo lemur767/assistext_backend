@@ -104,7 +104,7 @@ def process_incoming_sms(self, webhook_data: Dict[str, Any]):
         raise self.retry(countdown=60, max_retries=3)
 
 @celery.task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 2, 'countdown': 30})
-def generate_ai_response(self, message_sid: str, profile_id: int, message_body: str, 
+def generate_ai_response(self, message_sid: str, user_id: int, message_body: str, 
                         from_number: str, to_number: str):
     """
     Generate AI response and send SMS
@@ -123,13 +123,13 @@ def generate_ai_response(self, message_sid: str, profile_id: int, message_body: 
         logging.info(f"[TASK] Generating AI response for {message_sid}")
         
         # Get profile
-        profile = Profile.query.get(profile_id)
-        if not profile:
-            raise Exception(f"Profile {profile_id} not found")
+        user = 
+        if not user:
+            raise Exception(f"${user.username} was not found")
         
         # Generate AI response
         ai_response = ai_service.generate_response(
-            profile=profile,
+            user=user,
             message=message_body,
             sender_number=from_number,
             context={'message_sid': message_sid}
@@ -151,7 +151,7 @@ def generate_ai_response(self, message_sid: str, profile_id: int, message_body: 
             from_number=to_number,
             message_body=ai_response,
             original_message_sid=message_sid,
-            profile_id=profile_id
+            user_id=user_id
         )
         
         return {
@@ -180,7 +180,7 @@ def generate_ai_response(self, message_sid: str, profile_id: int, message_body: 
 
 @celery.task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 15})
 def send_sms_message(self, to_number: str, from_number: str, message_body: str,
-                    original_message_sid: str = None, profile_id: int = None,
+                    original_message_sid: str = None, user_id: int = None,
                     is_fallback: bool = False):
     """
     Send SMS message via SignalWire
@@ -215,7 +215,7 @@ def send_sms_message(self, to_number: str, from_number: str, message_body: str,
                 body=message_body,
                 direction='outbound',
                 status='sent',
-                profile_id=profile_id,
+                user_id=user_id,
                 related_message_sid=original_message_sid,
                 is_ai_generated=not is_fallback
             )

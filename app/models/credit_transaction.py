@@ -9,8 +9,8 @@ class CreditTransaction(db.Model):
     """Credit transaction model"""
     __tablename__ = 'credit_transactions'
     
-    id = db.Column(db.String(50), primary_key=True)
-    user_id = db.Column(db.String(50), db.ForeignKey('users.id'), nullable=False)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     
     # Transaction details
     type = db.Column(db.String(20), nullable=False)  # credit, debit, refund, bonus, adjustment, expiration

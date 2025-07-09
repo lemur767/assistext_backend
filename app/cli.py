@@ -78,13 +78,7 @@ def signalwire_status():
         click.echo(f"🔗 Webhooks: {sw_status['webhooks_configured']}/{sw_status['phone_numbers_count']}")
         click.echo(f"📡 Webhook URL: {sw_status['webhook_url']}")
         
-        # Profile statistics
-        profile_stats = dashboard_data['profile_stats']
-        click.echo(f"\n👤 Profile Statistics:")
-        click.echo(f"   Total profiles: {profile_stats['total']}")
-        click.echo(f"   SignalWire configured: {profile_stats['configured']}")
-        click.echo(f"   Active with AI: {profile_stats['active']}")
-        
+      
         # Message statistics
         msg_stats = dashboard_data['message_stats_24h']
         click.echo(f"\n💬 Messages (Last 24h):")

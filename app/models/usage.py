@@ -6,9 +6,9 @@ class UsageRecord(db.Model):
     """Usage tracking model"""
     __tablename__ = 'usage'
     
-    id = db.Column(db.String(50), primary_key=True)
-    user_id = db.Column(db.String(50), db.ForeignKey('users.id'), nullable=False)
-    subscription_id = db.Column(db.String(50), db.ForeignKey('subscriptions.id'), nullable=False)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    subscription_id = db.Column(db.Integer, db.ForeignKey('subscriptions.id'), nullable=False)
     
     # Period
     period_start = db.Column(db.DateTime, nullable=False)
@@ -80,7 +80,7 @@ class UsageOverage(db.Model):
     __tablename__ = 'usage_overages'
     
     id = db.Column(db.String(50), primary_key=True)
-    usage_id = db.Column(db.String(50), db.ForeignKey('usage.id'), nullable=False)
+    usage_id = db.Column(db.Integer, db.ForeignKey('usage.id'), nullable=False)
     
     # Overage details
     metric = db.Column(db.String(50), nullable=False)  # sms_credits, ai_credits, etc.

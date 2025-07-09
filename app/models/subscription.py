@@ -1,7 +1,3 @@
-# app/models/subscription.py
-"""
-Database models for subscriptions and subscription plans
-"""
 
 from app.extensions import db
 from datetime import datetime
@@ -11,7 +7,7 @@ class SubscriptionPlan(db.Model):
     """Subscription plan model"""
     __tablename__ = 'subscription_plans'
     
-    id = db.Column(db.String(50), primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
     status = db.Column(db.String(20), default='active')  # active, inactive, archived
@@ -68,9 +64,9 @@ class Subscription(db.Model):
     """User subscription model"""
     __tablename__ = 'subscriptions'
     
-    id = db.Column(db.String(50), primary_key=True)
-    user_id = db.Column(db.String(50), db.ForeignKey('users.id'), nullable=False)
-    plan_id = db.Column(db.String(50), db.ForeignKey('subscription_plans.id'), nullable=False)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    plan_id = db.Column(db.Integer, db.ForeignKey('subscription_plans.id'), nullable=False)
     
     # Status
     status = db.Column(db.String(20), nullable=False)  # active, canceled, past_due, unpaid, paused, trialing, incomplete
