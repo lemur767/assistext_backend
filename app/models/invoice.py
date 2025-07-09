@@ -1,7 +1,5 @@
-# app/models/invoice.py
-"""
-Database models for invoices and line items
-"""
+
+
 
 from app.extensions import db
 from datetime import datetime
@@ -41,7 +39,7 @@ class Invoice(db.Model):
     
     # Metadata
     description = db.Column(db.Text)
-    metadata = db.Column(db.JSON)
+    invoice_metadata = db.Column(db.JSON)
     
     # Relationships
     user = db.relationship('User', backref='invoices')
@@ -67,7 +65,7 @@ class Invoice(db.Model):
             'paid_at': self.paid_at.isoformat() if self.paid_at else None,
             'pdf_url': self.pdf_url,
             'description': self.description,
-            'metadata': self.metadata
+            'invoice_metadata': self.invoice_metadata
         }
         
         if include_relationships:
@@ -96,7 +94,7 @@ class InvoiceLineItem(db.Model):
     proration = db.Column(db.Boolean, default=False)
     
     # Metadata
-    metadata = db.Column(db.JSON)
+    invoice_item_metadata = db.Column(db.JSON)
     
     def to_dict(self):
         return {
@@ -109,5 +107,5 @@ class InvoiceLineItem(db.Model):
             'period_start': self.period_start.isoformat() if self.period_start else None,
             'period_end': self.period_end.isoformat() if self.period_end else None,
             'proration': self.proration,
-            'metadata': self.metadata
+            'invoice_item_metadata': self.invoice_item_metadata
         }

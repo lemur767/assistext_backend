@@ -52,7 +52,7 @@ class BillingSettings(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Metadata
-    metadata = db.Column(db.JSON)
+    bill_set_metadata = db.Column(db.JSON)
     
     # Relationships
     user = db.relationship('User', backref=db.backref('billing_settings', uselist=False))
@@ -90,5 +90,5 @@ class BillingSettings(db.Model):
             'timezone': self.timezone,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'metadata': self.metadata
+            'bill_set_metadata': self.bill_set_metadata
         }

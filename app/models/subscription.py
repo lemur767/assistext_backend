@@ -38,7 +38,7 @@ class SubscriptionPlan(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Metadata
-    metadata = db.Column(db.JSON)
+    sub_plan_metadata = db.Column(db.JSON)
     
     # Relationships
     subscriptions = db.relationship('Subscription', back_populates='plan', lazy='dynamic')
@@ -60,7 +60,7 @@ class SubscriptionPlan(db.Model):
             'category': self.category,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'metadata': self.metadata
+            'sub_plan_metadata': self.sub_plan_metadata
         }
 
 
@@ -104,7 +104,7 @@ class Subscription(db.Model):
     stripe_customer_id = db.Column(db.String(100))
     
     # Metadata
-    metadata = db.Column(db.JSON)
+    sub_metadata = db.Column(db.JSON)
     
     # Relationships
     user = db.relationship('User', back_populates='subscriptions')
@@ -134,7 +134,7 @@ class Subscription(db.Model):
             'cancel_at_period_end': self.cancel_at_period_end,
             'cancellation_reason': self.cancellation_reason,
             'stripe_subscription_id': self.stripe_subscription_id,
-            'metadata': self.metadata
+            'sub_metadata': self.sub_metadata
         }
         
         if include_relationships:

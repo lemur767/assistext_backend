@@ -37,7 +37,7 @@ class PaymentMethod(db.Model):
     last_used_at = db.Column(db.DateTime)
     
     # Metadata
-    metadata = db.Column(db.JSON)
+    pm_metadata = db.Column(db.JSON)
     
     # Relationships
     user = db.relationship('User', backref='payment_methods')
@@ -60,7 +60,7 @@ class PaymentMethod(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None,
-            'metadata': self.metadata
+            'pm_metadata': self.pm_metadata
         }
 
 
@@ -98,7 +98,7 @@ class Payment(db.Model):
     
     # Metadata
     description = db.Column(db.Text)
-    metadata = db.Column(db.JSON)
+    pay_metadata = db.Column(db.JSON)
     failure_reason = db.Column(db.Text)
     
     # Relationships
@@ -122,7 +122,7 @@ class Payment(db.Model):
             'processed_at': self.processed_at.isoformat() if self.processed_at else None,
             'description': self.description,
             'failure_reason': self.failure_reason,
-            'metadata': self.metadata
+            'pay_metadata': self.pay_metadata
         }
         
         if include_relationships:

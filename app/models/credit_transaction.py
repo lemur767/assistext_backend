@@ -31,7 +31,7 @@ class CreditTransaction(db.Model):
     processed_at = db.Column(db.DateTime)
     
     # Metadata
-    metadata = db.Column(db.JSON)
+    trans_metadata = db.Column(db.JSON)
     
     # Relationships
     user = db.relationship('User', backref='credit_transactions')
@@ -50,5 +50,5 @@ class CreditTransaction(db.Model):
             'expires_at': self.expires_at.isoformat() if self.expires_at else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'processed_at': self.processed_at.isoformat() if self.processed_at else None,
-            'metadata': self.metadata
+            'trans_metadata': self.trans_metadata
         }
