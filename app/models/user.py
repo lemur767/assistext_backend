@@ -99,11 +99,11 @@ class User(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
  
-    message = db.relationship('Message', back_populates='user', lazy='dynamic')
+    message = db.relationship('Message', back_populates='users', lazy='dynamic')
     
     # FIXED: Only define clients relationship if table exists and is properly configured
     try:
-        clients = db.relationship('Client', secondary=user_clients, backref='users', lazy='dynamic')
+        client = db.relationship('Client', secondary=user_clients, back_populates='users', lazy='dynamic')
     except Exception:
         # If there's an issue with the relationship, define it without secondary for now
         pass
