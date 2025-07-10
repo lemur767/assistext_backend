@@ -106,7 +106,7 @@ class Subscription(db.Model):
     user = db.relationship('User', back_populates='subscriptions')
     plan = db.relationship('SubscriptionPlan', back_populates='subscriptions')
     invoices = db.relationship('Invoice', back_populates='subscription', lazy='dynamic')
-    
+    payments = db.relationship('Payment', back_populates='subscription', lazy='dynamic')
     
     def to_dict(self, include_relationships=False):
         data = {
