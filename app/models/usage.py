@@ -2,7 +2,7 @@
 from app.extensions import db
 from datetime import datetime
 
-class UsageRecord(db.Model):
+class UseageRecord(db.Model):
     """Usage tracking model"""
     __tablename__ = 'usage'
     

@@ -34,7 +34,7 @@ class User(db.Model):
     invoices = db.relationship('Invoice', back_populates='user', lazy='dynamic')
     messages = db.relationship('Message', back_populates='user', lazy='dynamic')
     clients = db.relationship('Client', back_populates='user', lazy='dynamic')
-    usage_records = db.relationship('UseageRecord', back_populates='user', lazy='dynamic')
+    useage_records = db.relationship('UseageRecord', back_populates='user', lazy='dynamic')
     message_templates = db.relationship('MessageTemplate', back_populates='user', lazy='dynamic')
     credit_transactions = db.relationship('CreditTransaction', back_populates='user', lazy='dynamic')
     
