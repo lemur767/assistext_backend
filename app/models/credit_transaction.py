@@ -34,7 +34,7 @@ class CreditTransaction(db.Model):
     trans_metadata = db.Column(db.JSON)
     
     # Relationships
-    user = db.relationship('User', back_populates='credit_transactions', lazy='dynamic')
+    user = db.relationship('User', back_populates='credit_transactions')
     
     def to_dict(self):
         return {
