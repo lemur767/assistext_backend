@@ -46,7 +46,7 @@ class UseageRecord(db.Model):
     last_updated = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    user = db.relationship('User', back_populates='useage_records', lazy='dynamic')
+    user = db.relationship('User', back_populates='useage_records')
     overages = db.relationship('UsageOverage', backref='usage', lazy='dynamic', cascade='all, delete-orphan')
     
     def to_dict(self):
