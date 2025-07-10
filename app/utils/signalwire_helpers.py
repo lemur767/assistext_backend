@@ -9,20 +9,14 @@ import base64
 import logging
 from typing import Dict, Any, Optional, List, Tuple
 from flask import request, current_app
-from signalwire.rest import Client as SignalWireClient
-from signalwire.rest.api.v2010.account.available_phone_number import AvailablePhoneNumberInstance
-from signalwire.rest.api.v2010.account.incoming_phone_number import IncomingPhoneNumberInstance
+from signalwire.rest import Client
+
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-def get_signalwire_client() -> Optional[SignalWireClient]:
-    """
-    Get configured SignalWire client instance
-    
-    Returns:
-        SignalWire client or None if not configured
-    """
+def get_signalwire_client() -> Optional[Client]:
+  
     try:
         project_id = os.getenv('SIGNALWIRE_PROJECT_ID')
         api_token = os.getenv('SIGNALWIRE_API_TOKEN')
@@ -33,7 +27,7 @@ def get_signalwire_client() -> Optional[SignalWireClient]:
                 current_app.logger.error("Missing SignalWire credentials")
             return None
         
-        client = SignalWireClient(
+        client = Client(
             project_id,
             api_token,
             signalwire_space_url=space_url
