@@ -35,7 +35,7 @@ class User(db.Model):
     invoices = db.relationship('Invoice', back_populates='user', lazy='dynamic')
     messages = db.relationship('Message', back_populates='user', lazy='dynamic')
     clients = db.relationship('Client', back_populates='user', lazy='dynamic')
-    
+    api_keys = db.relationship('APIKey', back_populates='user', lazy='dynamic')
     # Utility relationships
     activity_logs = db.relationship('ActivityLog', back_populates='user', lazy='dynamic')
     
