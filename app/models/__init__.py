@@ -10,7 +10,7 @@ from .client import Client
 from .billing import Invoice, InvoiceItem, PaymentMethod, Payment
 from .credit_transaction import CreditTransaction
 from .billing_settings import BillingSettings
-from .usage import UsageRecord
+from .usage import UseageRecord
 
 # Import utility models
 from .utility import ActivityLog, NotificationLog, MessageTemplate
@@ -32,7 +32,7 @@ __all__ = [
     'Payment',
     'CreditTransaction',
     'BillingSettings',
-    'UsageRecord',
+    'UseageRecord',
     'ActivityLog',
     'NotificationLog',
     'MessageTemplate'
