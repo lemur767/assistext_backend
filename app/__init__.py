@@ -29,6 +29,7 @@ def create_app(config_name=None):
     # Load config safely
     configure_app(app, config_name)
     
+    configure_cors(app)
     # Initialize extensions
     initialize_extensions(app)
     
@@ -50,6 +51,13 @@ def create_app(config_name=None):
     @app.route('/health')
     def health_check():
         return jsonify({'status': 'healthy', 'message': 'API is running'})
+      # ✅ CORS FIX: Add options handler for all routes
+    @app.after_request
+    def after_request(response):
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        return response
     
     print("✅ Flask app fully initialized")
     return app
@@ -69,6 +77,48 @@ def configure_app(app, config_name):
         app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://app_user:Assistext2025Secure@localhost/assistext_prod')
         app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
         app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'xbaxf2xfflx16x95xcaxb3xdfxe6xb5!x1excaxd6x15Cxd7x97x08xb9x97x8exf5BpSx13')
+
+def configure_cors(app):  
+
+    print("🔧 Configuring CORS...")
+    
+    # Development origins
+    dev_origins = [
+        "http://localhost:3000",      # React dev server
+        "http://localhost:5173",      # Vite dev server
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173"
+    ]
+    
+    # Production origins
+    prod_origins = [
+        "https://assitext.ca",
+        "https://www.assitext.ca",
+        "https://app.assitext.ca"
+    ]
+    
+    # All allowed origins
+    allowed_origins = dev_origins + prod_origins
+    
+    # Configure CORS with comprehensive settings
+    CORS(app, 
+         origins=allowed_origins,
+         allow_headers=[
+             "Content-Type",
+             "Authorization", 
+             "X-Requested-With",
+             "Accept",
+             "Origin"
+         ],
+         methods=[
+             "GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"
+         ],
+         supports_credentials=True,
+         max_age=86400,  # 24 hours
+         vary_header=True
+    )
+    
+    print(f"✅ CORS configured for origins: {allowed_origins}")
 
 
 def initialize_extensions(app):
