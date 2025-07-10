@@ -6,6 +6,8 @@ import logging
 from typing import Dict, Any, Optional
 from flask import request, current_app
 from signalwire.rest import Client as SignalWireClient
+from app.utils.ollama_helpers import generate_sms_response;
+
 
 def get_signalwire_client() -> Optional[SignalWireClient]:
     """
@@ -118,6 +120,7 @@ def create_cxml_response(message: str = None, to_number: str = None, from_number
     Returns:
         Formatted cXML response string
     """
+    message = generate_sms_response
     if message and to_number and from_number:
         # Escape XML special characters
         escaped_message = escape_xml(message)

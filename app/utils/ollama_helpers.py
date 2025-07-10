@@ -28,11 +28,10 @@ class OllamaClient:
             # Create prompt for SMS response
             prompt = f"""System: {system_prompt}
 
-User message: {incoming_message}
+                    User message: {incoming_message}
+                Respond in a flirtacious manner.  Use appropriate fun emojis.  Keep responses to a minimum character count.
+                        """
 
-Respond naturally and helpfully. Keep response under 160 characters for SMS."""
-
-            # Make request to Ollama
             response = requests.post(
                 f"{self.base_url}/api/generate",
                 json={

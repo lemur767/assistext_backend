@@ -71,7 +71,7 @@ class Payment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     subscription_id = db.Column(db.Integer, db.ForeignKey('subscriptions.id'))
-    invoice_id = db.Column(db.Integer), db.ForeignKey('invoices.id'))
+    invoice_id = db.Column(db.Integer, db.ForeignKey('invoices.id'))
     payment_method_id = db.Column(db.Integer, db.ForeignKey('payment_methods.id'))
     
     # Payment details
