@@ -1,122 +1,220 @@
+
 from app.extensions import db
 from datetime import datetime
-import json
 
-
-
-
-
-class Invoice(db.Model):
-    __tablename__ = 'invoices'
+class PaymentMethod(db.Model):
+    """
+    SINGLE PaymentMethod model - consolidated from multiple files
+    """
+    __tablename__ = 'payment_methods'
     
     id = db.Column(db.Integer, primary_key=True)
-    subscription_id = db.Column(db.Integer, db.ForeignKey('subscriptions.id'), nullable=False)
-    stripe_invoice_id = db.Column(db.String(100), unique=True)
-    invoice_number = db.Column(db.String(50), unique=True, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     
-    # Amount and currency
-    amount_due = db.Column(db.Numeric(10, 2), nullable=False)
-    amount_paid = db.Column(db.Numeric(10, 2), default=0)
-    currency = db.Column(db.String(3), default='USD')
-    tax_amount = db.Column(db.Numeric(10, 2), default=0)
+    # Payment method details
+    type = db.Column(db.String(20), nullable=False)  # card, bank, paypal, etc.
+    is_default = db.Column(db.Boolean, default=False)
+    status = db.Column(db.String(20), default='active')  # active, expired, invalid
     
-    # Status and dates
-    status = db.Column(db.String(20), default='draft')  # draft, open, paid, void, uncollectible
-    billing_reason = db.Column(db.String(50))  # subscription_create, subscription_cycle, etc.
+    # Card details (for display only - no sensitive data)
+    card_brand = db.Column(db.String(20))
+    card_last4 = db.Column(db.String(4))
+    card_exp_month = db.Column(db.Integer)
+    card_exp_year = db.Column(db.Integer)
     
-    # Important dates
+    # Bank details (for display only)
+    bank_name = db.Column(db.String(100))
+    bank_last4 = db.Column(db.String(4))
+    
+    # Billing address
+    billing_address = db.Column(db.JSON)
+    
+    # Payment processor references
+    stripe_payment_method_id = db.Column(db.String(100), unique=True)
+    stripe_customer_id = db.Column(db.String(100))
+    
+    # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    period_start = db.Column(db.DateTime)
-    period_end = db.Column(db.DateTime)
-    due_date = db.Column(db.DateTime)
-    paid_at = db.Column(db.DateTime)
-    voided_at = db.Column(db.DateTime)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_used_at = db.Column(db.DateTime)
     
-    # Additional details
-    description = db.Column(db.Text)
-    invoice_pdf_url = db.Column(db.String(500))  # URL to PDF from Stripe
-    hosted_invoice_url = db.Column(db.String(500))  # Stripe hosted invoice page
+    # Metadata
+    pm_metadata = db.Column(db.JSON)
     
-    # FIXED: Changed 'metadata' to 'invoice_metadata'
-    invoice_metadata = db.Column(db.Text)  # JSON string for flexible data storage
-    
-    user = db.relationship('User', back_populates='invoices')
-    subscription = db.relationship('Subscription', back_populates='invoices')
-    
-    def get_invoice_metadata(self):
-        """Get invoice metadata as a dictionary"""
-        if not self.invoice_metadata:
-            return {}
-        try:
-            return json.loads(self.invoice_metadata)
-        except (json.JSONDecodeError, TypeError):
-            return {}
-    
-    def set_invoice_metadata(self, metadata_dict):
-        """Set invoice metadata from a dictionary"""
-        if metadata_dict:
-            self.invoice_metadata = json.dumps(metadata_dict)
-        else:
-            self.invoice_metadata = None
-    
-    def is_paid(self):
-        """Check if invoice is fully paid"""
-        return self.status == 'paid' and self.amount_paid >= self.amount_due
-    
-    def is_overdue(self):
-        """Check if invoice is overdue"""
-        if not self.due_date or self.is_paid():
-            return False
-        return datetime.utcnow() > self.due_date
-    
-    def get_balance_due(self):
-        """Get remaining balance due"""
-        return max(0, float(self.amount_due) - float(self.amount_paid or 0))
-    
-    def mark_as_paid(self, amount_paid=None, paid_at=None):
-        """Mark invoice as paid"""
-        self.amount_paid = amount_paid or self.amount_due
-        self.paid_at = paid_at or datetime.utcnow()
-        self.status = 'paid'
-        db.session.commit()
+    # Relationships
+    user = db.relationship('User', back_populates='payment_methods')
+    payments = db.relationship('Payment', back_populates='payment_method', lazy='dynamic')
     
     def to_dict(self):
         return {
             'id': self.id,
-            'subscription_id': self.subscription_id,
-            'stripe_invoice_id': self.stripe_invoice_id,
-            'invoice_number': self.invoice_number,
-            'amount_due': float(self.amount_due),
-            'amount_paid': float(self.amount_paid or 0),
-            'currency': self.currency,
-            'tax_amount': float(self.tax_amount or 0),
+            'user_id': self.user_id,
+            'type': self.type,
+            'is_default': self.is_default,
             'status': self.status,
-            'billing_reason': self.billing_reason,
-            'created_at': self.created_at.isoformat(),
-            'period_start': self.period_start.isoformat() if self.period_start else None,
-            'period_end': self.period_end.isoformat() if self.period_end else None,
-            'due_date': self.due_date.isoformat() if self.due_date else None,
-            'paid_at': self.paid_at.isoformat() if self.paid_at else None,
-            'voided_at': self.voided_at.isoformat() if self.voided_at else None,
-            'description': self.description,
-            'invoice_pdf_url': self.invoice_pdf_url,
-            'hosted_invoice_url': self.hosted_invoice_url,
-            'invoice_metadata': self.get_invoice_metadata(),
-            'balance_due': self.get_balance_due(),
-            'is_paid': self.is_paid(),
-            'is_overdue': self.is_overdue()
+            'card_brand': self.card_brand,
+            'card_last4': self.card_last4,
+            'card_exp_month': self.card_exp_month,
+            'card_exp_year': self.card_exp_year,
+            'bank_name': self.bank_name,
+            'bank_last4': self.bank_last4,
+            'billing_address': self.billing_address,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None,
+            'pm_metadata': self.pm_metadata
         }
 
 
+class Payment(db.Model):
+    """Payment model"""
+    __tablename__ = 'payments'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    subscription_id = db.Column(db.Integer, db.ForeignKey('subscriptions.id'))
+    invoice_id = db.Column(db.Integer, db.ForeignKey('invoices.id'))
+    payment_method_id = db.Column(db.Integer, db.ForeignKey('payment_methods.id'))
+    
+    # Payment details
+    amount = db.Column(db.Numeric(10, 2), nullable=False)
+    currency = db.Column(db.String(3), default='USD')
+    status = db.Column(db.String(20), nullable=False)  # pending, succeeded, failed, canceled, refunded
+    
+    # Transaction details
+    transaction_id = db.Column(db.String(100))
+    processor_response = db.Column(db.JSON)
+    
+    # Refund information
+    refunded_amount = db.Column(db.Numeric(10, 2), default=0.0)
+    refund_reason = db.Column(db.Text)
+    
+    # Payment processor references
+    stripe_payment_intent_id = db.Column(db.String(100), unique=True)
+    stripe_invoice_id = db.Column(db.String(100))
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    processed_at = db.Column(db.DateTime)
+    
+    # Metadata
+    pay_metadata = db.Column(db.JSON)
+    
+    # Relationships
+    user = db.relationship('User', back_populates='payments')
+    subscription = db.relationship('Subscription', back_populates='payments')
+    invoice = db.relationship('Invoice', back_populates='payments')
+    payment_method = db.relationship('PaymentMethod', back_populates='payments')
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'subscription_id': self.subscription_id,
+            'invoice_id': self.invoice_id,
+            'payment_method_id': self.payment_method_id,
+            'amount': float(self.amount),
+            'currency': self.currency,
+            'status': self.status,
+            'transaction_id': self.transaction_id,
+            'refunded_amount': float(self.refunded_amount or 0),
+            'refund_reason': self.refund_reason,
+            'stripe_payment_intent_id': self.stripe_payment_intent_id,
+            'stripe_invoice_id': self.stripe_invoice_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'processed_at': self.processed_at.isoformat() if self.processed_at else None,
+            'pay_metadata': self.pay_metadata
+        }
+
+
+class Invoice(db.Model):
+    """Invoice model"""
+    __tablename__ = 'invoices'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    subscription_id = db.Column(db.Integer, db.ForeignKey('subscriptions.id'))
+    
+    # Invoice details
+    invoice_number = db.Column(db.String(50), unique=True, nullable=False)
+    status = db.Column(db.String(20), nullable=False)  # draft, open, paid, void, uncollectible
+    
+    # Amount details
+    subtotal = db.Column(db.Numeric(10, 2), nullable=False)
+    tax_amount = db.Column(db.Numeric(10, 2), default=0.0)
+    discount_amount = db.Column(db.Numeric(10, 2), default=0.0)
+    total = db.Column(db.Numeric(10, 2), nullable=False)
+    currency = db.Column(db.String(3), default='USD')
+    
+    # Payment details
+    amount_paid = db.Column(db.Numeric(10, 2), default=0.0)
+    amount_due = db.Column(db.Numeric(10, 2), nullable=False)
+    
+    # Billing period
+    period_start = db.Column(db.DateTime)
+    period_end = db.Column(db.DateTime)
+    
+    # Due date
+    due_date = db.Column(db.DateTime)
+    
+    # Stripe references
+    stripe_invoice_id = db.Column(db.String(100), unique=True)
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    paid_at = db.Column(db.DateTime)
+    
+    # Metadata
+    inv_metadata = db.Column(db.JSON)
+    
+    # Relationships
+    user = db.relationship('User', back_populates='invoices')
+    subscription = db.relationship('Subscription', back_populates='invoices')
+    invoice_items = db.relationship('InvoiceItem', back_populates='invoice', lazy='dynamic')
+    payments = db.relationship('Payment', back_populates='invoice', lazy='dynamic')
+    
+    def to_dict(self, include_items=False):
+        data = {
+            'id': self.id,
+            'user_id': self.user_id,
+            'subscription_id': self.subscription_id,
+            'invoice_number': self.invoice_number,
+            'status': self.status,
+            'subtotal': float(self.subtotal),
+            'tax_amount': float(self.tax_amount or 0),
+            'discount_amount': float(self.discount_amount or 0),
+            'total': float(self.total),
+            'currency': self.currency,
+            'amount_paid': float(self.amount_paid or 0),
+            'amount_due': float(self.amount_due),
+            'period_start': self.period_start.isoformat() if self.period_start else None,
+            'period_end': self.period_end.isoformat() if self.period_end else None,
+            'due_date': self.due_date.isoformat() if self.due_date else None,
+            'stripe_invoice_id': self.stripe_invoice_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'paid_at': self.paid_at.isoformat() if self.paid_at else None,
+            'inv_metadata': self.inv_metadata
+        }
+        
+        if include_items:
+            data['items'] = [item.to_dict() for item in self.invoice_items]
+            
+        return data
+
+
 class InvoiceItem(db.Model):
+    """Invoice item model"""
     __tablename__ = 'invoice_items'
     
     id = db.Column(db.Integer, primary_key=True)
     invoice_id = db.Column(db.Integer, db.ForeignKey('invoices.id'), nullable=False)
-    stripe_invoice_item_id = db.Column(db.String(100))
     
     # Item details
-    description = db.Column(db.String(500), nullable=False)
+    description = db.Column(db.String(255), nullable=False)
     quantity = db.Column(db.Integer, default=1)
     unit_amount = db.Column(db.Numeric(10, 2), nullable=False)
     amount = db.Column(db.Numeric(10, 2), nullable=False)
@@ -130,7 +228,14 @@ class InvoiceItem(db.Model):
     proration = db.Column(db.Boolean, default=False)
     discount_amount = db.Column(db.Numeric(10, 2), default=0)
     
+    # Stripe reference
+    stripe_invoice_item_id = db.Column(db.String(100))
+    
+    # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Metadata
+    inv_item_metadata = db.Column(db.JSON)
     
     # Relationships
     invoice = db.relationship('Invoice', back_populates='invoice_items')
@@ -149,193 +254,6 @@ class InvoiceItem(db.Model):
             'period_end': self.period_end.isoformat() if self.period_end else None,
             'proration': self.proration,
             'discount_amount': float(self.discount_amount or 0),
-            'created_at': self.created_at.isoformat()
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'inv_item_metadata': self.inv_item_metadata
         }
-
-
-class PaymentMethod(db.Model):
-    __tablename__ = 'payment_methods'
-    
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    stripe_payment_method_id = db.Column(db.String(100), unique=True, nullable=False)
-    stripe_customer_id = db.Column(db.String(100))
-    
-    # Payment method type and details
-    type = db.Column(db.String(20), nullable=False)  # card, bank_account, etc.
-    
-    # Card details (for type='card')
-    card_brand = db.Column(db.String(20))  # visa, mastercard, amex, etc.
-    card_last4 = db.Column(db.String(4))
-    card_exp_month = db.Column(db.Integer)
-    card_exp_year = db.Column(db.Integer)
-    card_country = db.Column(db.String(2))
-    card_funding = db.Column(db.String(10))  # credit, debit, prepaid
-    
-    # Bank account details (for type='bank_account')
-    bank_last4 = db.Column(db.String(4))
-    bank_routing_number = db.Column(db.String(20))
-    bank_account_type = db.Column(db.String(10))  # checking, savings
-    bank_name = db.Column(db.String(100))
-    
-    # Status and settings
-    is_default = db.Column(db.Boolean, default=False)
-    is_active = db.Column(db.Boolean, default=True)
-    
-    # Billing address
-    billing_name = db.Column(db.String(100))
-    billing_email = db.Column(db.String(255))
-    billing_phone = db.Column(db.String(20))
-    billing_address_line1 = db.Column(db.String(200))
-    billing_address_line2 = db.Column(db.String(200))
-    billing_city = db.Column(db.String(100))
-    billing_state = db.Column(db.String(100))
-    billing_postal_code = db.Column(db.String(20))
-    billing_country = db.Column(db.String(2))
-    
-    # FIXED: Changed 'metadata' to 'payment_metadata'
-    payment_metadata = db.Column(db.Text)  # JSON string
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    last_used_at = db.Column(db.DateTime)
-    
-    # Relationships
-    user = db.relationship('User', back_populates='payment_methods')
-    
-    def get_payment_metadata(self):
-        """Get payment metadata as a dictionary"""
-        if not self.payment_metadata:
-            return {}
-        try:
-            return json.loads(self.payment_metadata)
-        except (json.JSONDecodeError, TypeError):
-            return {}
-    
-    def set_payment_metadata(self, metadata_dict):
-        """Set payment metadata from a dictionary"""
-        if metadata_dict:
-            self.payment_metadata = json.dumps(metadata_dict)
-        else:
-            self.payment_metadata = None
-    
-    def is_expired(self):
-        """Check if card is expired (only for card type)"""
-        if self.type != 'card' or not self.card_exp_month or not self.card_exp_year:
-            return False
-        
-        from datetime import date
-        today = date.today()
-        return (self.card_exp_year < today.year or 
-                (self.card_exp_year == today.year and self.card_exp_month < today.month))
-    
-    def get_display_name(self):
-        """Get a user-friendly display name for the payment method"""
-        if self.type == 'card':
-            brand = self.card_brand.title() if self.card_brand else 'Card'
-            return f"{brand} ending in {self.card_last4}"
-        elif self.type == 'bank_account':
-            account_type = self.bank_account_type.title() if self.bank_account_type else 'Bank'
-            bank = self.bank_name or 'Bank'
-            return f"{bank} {account_type} ending in {self.bank_last4}"
-        else:
-            return f"{self.type.title()} Payment Method"
-    
-    def set_as_default(self):
-        """Set this payment method as the default for the user"""
-        # Remove default flag from other payment methods
-        PaymentMethod.query.filter_by(user_id=self.user_id, is_default=True).update({
-            'is_default': False
-        })
-        
-        # Set this one as default
-        self.is_default = True
-        db.session.commit()
-    
-    def to_dict(self, include_sensitive=False):
-        """Convert to dictionary, optionally including sensitive data"""
-        result = {
-            'id': self.id,
-            'user_id': self.user_id,
-            'stripe_payment_method_id': self.stripe_payment_method_id if include_sensitive else None,
-            'type': self.type,
-            'is_default': self.is_default,
-            'is_active': self.is_active,
-            'display_name': self.get_display_name(),
-            'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat(),
-            'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None,
-            'payment_metadata': self.get_payment_metadata()
-        }
-        
-        # Add type-specific details
-        if self.type == 'card':
-            result.update({
-                'card': {
-                    'brand': self.card_brand,
-                    'last4': self.card_last4,
-                    'exp_month': self.card_exp_month,
-                    'exp_year': self.card_exp_year,
-                    'country': self.card_country,
-                    'funding': self.card_funding,
-                    'is_expired': self.is_expired()
-                }
-            })
-        elif self.type == 'bank_account':
-            result.update({
-                'bank_account': {
-                    'last4': self.bank_last4,
-                    'routing_number': self.bank_routing_number if include_sensitive else None,
-                    'account_type': self.bank_account_type,
-                    'bank_name': self.bank_name
-                }
-            })
-        
-        return result
-
-
-# Helper functions
-
-def generate_invoice_number():
-    """Generate a unique invoice number"""
-    import random
-    import string
-    
-    # Format: INV-YYYYMM-XXXXX
-    year_month = datetime.now().strftime('%Y%m')
-    random_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
-    
-    invoice_number = f"INV-{year_month}-{random_suffix}"
-    
-    # Ensure uniqueness
-    while Invoice.query.filter_by(invoice_number=invoice_number).first():
-        random_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
-        invoice_number = f"INV-{year_month}-{random_suffix}"
-    
-    return invoice_number
-
-
-def get_user_invoices(user_id, limit=None, status=None):
-    """Get invoices for a specific user"""
-    query = db.session.query(Invoice).join(Subscription).filter(
-        Subscription.user_id == user_id
-    )
-    
-    if status:
-        query = query.filter(Invoice.status == status)
-    
-    query = query.order_by(Invoice.created_at.desc())
-    
-    if limit:
-        query = query.limit(limit)
-    
-    return query.all()
-
-
-def get_user_payment_methods(user_id, active_only=True):
-    """Get all payment methods for a user"""
-    query = PaymentMethod.query.filter_by(user_id=user_id)
-    
-    if active_only:
-        query = query.filter_by(is_active=True)
-    
-    return query.order_by(PaymentMethod.is_default.desc(), PaymentMethod.created_at.desc()).all()

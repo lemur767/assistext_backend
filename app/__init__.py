@@ -1,16 +1,21 @@
+# app/__init__.py
+"""
+Flask application factory
+Fixed to prevent circular imports and duplicate blueprint registrations
+"""
 import logging
 import os
 from flask import Flask, jsonify
 from flask_cors import CORS
-from app.config import get_config
-from app.extensions import db, migrate, jwt
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def create_app(config_name=None):
-       
+    """
+    Application factory pattern
+    """
     print("🚀 Creating Flask app...")
     
     # Create Flask app
@@ -21,7 +26,39 @@ def create_app(config_name=None):
     if config_name is None:
         config_name = os.getenv('FLASK_ENV', 'production')
     
+    # Load config safely
+    configure_app(app, config_name)
+    
+    # Initialize extensions
+    initialize_extensions(app)
+    
+    # Import models after extensions are initialized
+    # This prevents circular imports
+    with app.app_context():
+        import_models()
+    
+    # Set up JWT handlers
+    setup_jwt_handlers(app)
+    
+    # Register error handlers
+    setup_error_handlers(app)
+    
+    # Register blueprints
+    register_blueprints(app)
+    
+    # Add health check endpoint
+    @app.route('/health')
+    def health_check():
+        return jsonify({'status': 'healthy', 'message': 'API is running'})
+    
+    print("✅ Flask app fully initialized")
+    return app
+
+
+def configure_app(app, config_name):
+    """Configure the Flask app"""
     try:
+        from app.config import get_config
         config = get_config(config_name)
         app.config.from_object(config)
         print(f"✅ Configuration loaded: {config_name}")
@@ -29,131 +66,158 @@ def create_app(config_name=None):
         print(f"❌ Configuration failed: {e}")
         # Set basic defaults
         app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'eGJheGYyeGZmbHgxNng5NXhjYXhiM3hkZnhlNnhiOHhiOXg5N3g4ZXhmNUJwU3gxMw==')
-        app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL','postgresql://app_user:Assistext2025Secure@localhost/assistext_prod')
+        app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://app_user:Assistext2025Secure@localhost/assistext_prod')
         app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    
-    # Initialize extensions
+        app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'xbaxf2xfflx16x95xcaxb3xdfxe6xb5!x1excaxd6x15Cxd7x97x08xb9x97x8exf5BpSx13')
+
+
+def initialize_extensions(app):
+    """Initialize Flask extensions"""
     print("🔧 Initializing extensions...")
     try:
-        CORS(app, origins=["http://localhost:3000", "http://localhost:5173","https://assitext.ca","https://www.assitext.ca"])
+        from app.extensions import db, migrate, jwt
+        
+        # Initialize CORS
+        CORS(app, origins=[
+            "http://localhost:3000", 
+            "http://localhost:5173",
+            "https://assitext.ca",
+            "https://www.assitext.ca"
+        ])
+        
+        # Initialize database
         db.init_app(app)
         migrate.init_app(app, db)
+        
+        # Initialize JWT
         jwt.init_app(app)
+        
         print("✅ Extensions initialized")
     except Exception as e:
         print(f"❌ Extensions failed: {e}")
-    
-    # Set up JWT handlers
+        raise
+
+
+def import_models():
+    """
+    Import models after extensions are initialized
+    This prevents circular imports and ensures proper table creation
+    """
     try:
-        setup_jwt_handlers(app)
-        print("✅ JWT handlers set up")
+        # Import all models in the correct order
+        from app.models import (
+            User, Subscription, SubscriptionPlan, Message, Client,
+            Invoice, InvoiceItem, PaymentMethod, Payment,
+            CreditTransaction, BillingSettings, UsageRecord,
+            ActivityLog, NotificationLog, MessageTemplate
+        )
+        print("✅ Models imported successfully")
     except Exception as e:
-        print(f"❌ JWT handlers failed: {e}")
-    
-    # Register error handlers
-    try:
-        register_error_handlers(app)
-        print("✅ Error handlers registered")
-    except Exception as e:
-        print(f"❌ Error handlers failed: {e}")
-    
-    # Register blueprints - THIS IS THE CRITICAL PART
-    print("🔧 Registering blueprints...")
-    print(f"   App type before blueprint registration: {type(app)}")
-    print(f"   App has register_blueprint: {hasattr(app, 'register_blueprint')}")
-    
-    try:
-        # Import the blueprint registration function
-        from app.api import register_blueprints
-        print(f"   ✅ Blueprint registration function imported: {register_blueprints}")
-        
-        # Call the function
-        blueprint_count = register_blueprints(app)
-        print(f"   ✅ {blueprint_count} blueprints registered")
-        
-    except Exception as e:
-        print(f"   ❌ Blueprint registration failed: {e}")
-        import traceback
-        traceback.print_exc()
-    
-    # Set up database
-    try:
-        setup_database(app)
-        print("✅ Database set up")
-    except Exception as e:
-        print(f"❌ Database setup failed: {e}")
-    
-    # Add health check endpoint
-    @app.route('/health')
-    def health_check():
-        return {'status': 'healthy', 'service': 'SMS AI Backend'}
-    
-    logger.info("Flask app created successfully")
-    return app
+        print(f"❌ Model import failed: {e}")
+        # Continue anyway - some models may be optional
 
 
 def setup_jwt_handlers(app):
     """Set up JWT error handlers"""
-    
-    @jwt.expired_token_loader
-    def expired_token_callback(jwt_header, jwt_payload):
-        return jsonify({'error': 'Token has expired', 'message': 'Please log in again'}), 401
-    
-    @jwt.invalid_token_loader
-    def invalid_token_callback(error):
-        return jsonify({'error': 'Invalid token', 'message': 'Please provide a valid token'}), 401
-    
-    @jwt.unauthorized_loader
-    def missing_token_callback(error):
-        return jsonify({'error': 'Authorization required', 'message': 'Please provide an access token'}), 401
-    
-    @jwt.revoked_token_loader
-    def revoked_token_callback(jwt_header, jwt_payload):
-        return jsonify({'error': 'Token has been revoked', 'message': 'Please log in again'}), 401
-    
-    logger.info("JWT handlers configured")
-
-
-def register_error_handlers(app):
-    """Register application error handlers"""
-    
-    @app.errorhandler(404)
-    def not_found_error(error):
-        return jsonify({'error': 'Not found'}), 404
-    
-    @app.errorhandler(500)
-    def internal_error(error):
-        logger.error(f"Internal server error: {error}")
-        return jsonify({'error': 'Internal server error'}), 500
-    
-    @app.errorhandler(400)
-    def bad_request_error(error):
-        return jsonify({'error': 'Bad request'}), 400
-    
-    @app.errorhandler(401)
-    def unauthorized_error(error):
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    @app.errorhandler(403)
-    def forbidden_error(error):
-        return jsonify({'error': 'Forbidden'}), 403
-    
-    @app.errorhandler(429)
-    def rate_limit_error(error):
-        return jsonify({'error': 'Rate limit exceeded', 'message': 'Too many requests'}), 429
-
-
-def setup_database(app):
-    """Set up database models and tables"""
     try:
-        # Import models to register them with SQLAlchemy
-        from app.models import User, Client, Message
+        from app.extensions import jwt
         
-        with app.app_context():
-            # Create tables if they don't exist
-            db.create_all()
-            logger.info("Database tables created/verified")
+        @jwt.expired_token_loader
+        def expired_token_callback(jwt_header, jwt_payload):
+            return jsonify({'message': 'Token has expired'}), 401
         
+        @jwt.invalid_token_loader
+        def invalid_token_callback(error):
+            return jsonify({'message': 'Invalid token'}), 401
+        
+        @jwt.unauthorized_loader
+        def unauthorized_callback(error):
+            return jsonify({'message': 'Authorization required'}), 401
+        
+        print("✅ JWT handlers set up")
     except Exception as e:
-        logger.error(f"Database setup failed: {e}")
-        # Don't raise here - let the app start even if DB setup fails
+        print(f"❌ JWT handlers failed: {e}")
+
+
+def setup_error_handlers(app):
+    """Set up error handlers"""
+    try:
+        @app.errorhandler(404)
+        def not_found(error):
+            return jsonify({'error': 'Not found'}), 404
+        
+        @app.errorhandler(500)
+        def internal_error(error):
+            return jsonify({'error': 'Internal server error'}), 500
+        
+        print("✅ Error handlers set up")
+    except Exception as e:
+        print(f"❌ Error handlers failed: {e}")
+
+
+def register_blueprints(app):
+    """
+    Register blueprints safely
+    Fixed to prevent duplicate registrations and circular imports
+    """
+    print("🔧 Registering blueprints...")
+    
+    # Track registered blueprints to prevent duplicates
+    registered_blueprints = set()
+    blueprints_registered = 0
+    
+    # Define blueprints in priority order
+    blueprint_configs = [
+        # Core blueprints (required)
+        ('app.api.auth', 'auth_bp', '/api/auth', True),
+        ('app.api.webhooks', 'webhooks_bp', '/api/webhooks', True),
+        ('app.api.billing', 'billing_bp', '/api/billing', True),
+        
+        # Additional blueprints (optional)
+        ('app.api.messages', 'messages_bp', '/api/messages', False),
+        ('app.api.clients', 'clients_bp', '/api/clients', False),
+        ('app.api.signalwire', 'signalwire_bp', '/api/signalwire', False),
+        ('app.api.user_profile', 'user_profile_bp', '/api/user/profile', False),
+    ]
+    
+    for module_name, blueprint_name, url_prefix, is_required in blueprint_configs:
+        if blueprint_name in registered_blueprints:
+            print(f"⚠️  Blueprint {blueprint_name} already registered, skipping")
+            continue
+            
+        try:
+            # Import the module
+            module = __import__(module_name, fromlist=[blueprint_name])
+            
+            # Get the blueprint object
+            if hasattr(module, blueprint_name):
+                blueprint = getattr(module, blueprint_name)
+                
+                # Verify it's a blueprint
+                if hasattr(blueprint, 'register'):
+                    app.register_blueprint(blueprint, url_prefix=url_prefix)
+                    registered_blueprints.add(blueprint_name)
+                    blueprints_registered += 1
+                    logger.info(f"✅ {blueprint_name} registered at {url_prefix}")
+                else:
+                    logger.warning(f"⚠️  {blueprint_name} is not a valid blueprint")
+            else:
+                if is_required:
+                    logger.error(f"❌ Required blueprint {blueprint_name} not found in {module_name}")
+                else:
+                    logger.info(f"⚠️  Optional blueprint {blueprint_name} not found in {module_name}")
+                    
+        except ImportError as e:
+            if is_required:
+                logger.error(f"❌ Required blueprint {blueprint_name} could not be imported: {e}")
+            else:
+                logger.info(f"⚠️  Optional blueprint {blueprint_name} not available: {e}")
+                
+        except Exception as e:
+            if is_required:
+                logger.error(f"❌ Error registering required blueprint {blueprint_name}: {e}")
+            else:
+                logger.warning(f"⚠️  Error registering optional blueprint {blueprint_name}: {e}")
+    
+    logger.info(f"📊 Total blueprints registered: {blueprints_registered}")
+    return blueprints_registered
