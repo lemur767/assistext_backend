@@ -27,18 +27,19 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Relationships - Use string references to avoid circular imports
-    # These will be resolved when the models are loaded
+    
     subscriptions = db.relationship('Subscription', back_populates='user', lazy='dynamic')
     payment_methods = db.relationship('PaymentMethod', back_populates='user', lazy='dynamic')
     payments = db.relationship('Payment', back_populates='user', lazy='dynamic')
     invoices = db.relationship('Invoice', back_populates='user', lazy='dynamic')
     messages = db.relationship('Message', back_populates='user', lazy='dynamic')
     clients = db.relationship('Client', back_populates='user', lazy='dynamic')
-    api_keys = db.relationship('APIKey', back_populates='user', lazy='dynamic')
+   
     # Utility relationships
     activity_logs = db.relationship('ActivityLog', back_populates='user', lazy='dynamic')
-    
+    notification_settings = db.relationship('NotificationSetting', back_populates='user', lazy='dynamic')
+    api_keys = db.relationship('APIKey', back_populates='user', lazy='dynamic')
+    notification_logs = db.relationship('NotificationLog', back_populates='user', lazy='dynamic')
     def set_password(self, password):
         """Set password hash"""
         self.password_hash = generate_password_hash(password)
