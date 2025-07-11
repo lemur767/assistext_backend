@@ -55,20 +55,22 @@ def register():
             first_name=data.get('first_name', ''),
             last_name=data.get('last_name', ''),
             phone_number=data.get('phone_number', ''),
-            timezone=data.get('timezone', 'UTC'),
+           
+            
             
             # Default business settings
-            auto_reply_enabled=data.get('auto_reply_enabled', True),
-            daily_message_limit=data.get('daily_message_limit', 100),
+           # auto_reply_enabled=data.get('auto_reply_enabled', True),
+           # daily_message_limit=data.get('daily_message_limit', 100),
             
             # Default AI settings
-            ai_enabled=data.get('ai_enabled', True),
-            ai_personality=data.get('ai_personality', 'Seductive mistress, flirty and fun.  Keep responses short.  Use emojis'),
-            ai_instructions=data.get('ai_instructions','Flirty, short, polite responses.'),
+           # ai_enabled=data.get('ai_enabled', True),
+           # ai_personality=data.get('ai_personality', 'Seductive mistress, flirty and fun.  Keep responses short.  Use emojis'),
+           # ai_instructions=data.get('ai_instructions','Flirty, short, polite responses.'),
                     
-            signalwire_project_id=data.get('signalwire_project_id'),
-            signalwire_auth_token=data.get('signalwire_auth_token'),
-            signalwire_space_url=data.get('signalwire_space_url'),
+           # signalwire_project_id=data.get('signalwire_project_id'),
+           # signalwire_auth_token=data.get('signalwire_auth_token'),
+           # signalwire_space_url=data.get('signalwire_space_url'),
+            
         )
         
         # Set password
