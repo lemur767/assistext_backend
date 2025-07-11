@@ -7,7 +7,7 @@ import sys
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv()
+load_dotenv('.env')
 
 # Add the project directory to Python path
 project_dir = os.path.dirname(os.path.abspath(__file__))
