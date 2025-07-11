@@ -13,8 +13,11 @@ auth_bp = Blueprint('auth', __name__)
 
 
 
-@auth_bp.route('/register', methods=['POST'])
+@auth_bp.route('/register', methods=['POST', 'OPTIONS'])
 def register():
+    
+    if request.method == 'OPTIONS':
+        return '', 200
   
     try:
         data = request.get_json()
