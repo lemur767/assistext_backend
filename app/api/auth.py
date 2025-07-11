@@ -64,8 +64,8 @@ def register():
             
             # Default AI settings
             ai_enabled=data.get('ai_enabled', True),
-            ai_personality=data.get('ai_personality', 'Respond helpfully and professionally to messages.'),
-            ai_instructions=data.get('ai_instructions', 'Respond helpfully and professionally to messages.'),
+            ai_personality=data.get('ai_personality' ),
+            ai_instructions=data.get('ai_instructions'),
             
             # SignalWire configuration (optional during registration)
             signalwire_phone_number=data.get('signalwire_phone_number'),
@@ -145,7 +145,8 @@ def login():
         user.last_login = datetime.utcnow()
         
         # Reset monthly count if needed
-        user.reset_monthly_count_if_needed()
+       # user.reset_monthly_count_if_needed()
+        
         
         db.session.commit()
         

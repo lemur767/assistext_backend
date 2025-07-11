@@ -44,9 +44,11 @@ class User(db.Model):
     notification_settings = db.relationship('NotificationSetting', back_populates='user', lazy='dynamic')
     api_keys = db.relationship('APIKey', back_populates='user', lazy='dynamic')
     notification_logs = db.relationship('NotificationLog', back_populates='user', lazy='dynamic')
+    
+    
     def set_password(self, password):
         """Set password hash"""
-        self.password_hash = generate_password_hash(password)
+        self.password_hash = generate_password_hash(password, method='pbkdf2:sha256', salt_length=16)
         
     def check_password(self, password):
         """Check password against hash"""
