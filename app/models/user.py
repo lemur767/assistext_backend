@@ -48,7 +48,12 @@ class User(db.Model):
     
     def set_password(self, password):
         """Set password hash"""
-        self.password_hash = generate_password_hash(password, method='pbkdf2:sha256', salt_length=16)
+        hash_result = generate_password_hash(password, method='pbkdf2:sha256', salt_length=16)
+        
+        if isinstance(hash_result, bytes):
+            self.password_hash = hash_result.decode('utf-8')
+        else:
+            self.password_hash = str(hash_result)
         
     def check_password(self, password):
         """Check password against hash"""
@@ -70,21 +75,29 @@ class User(db.Model):
         return self.payment_methods.filter_by(is_default=True, status='active').first()
     
     def to_dict(self, include_relationships=False):
-        """Convert user to dictionary"""
+        def safe_isoformat(dt):
+            if dt is None:
+                return None
+            if hasattr(dt, 'isoformat'):
+                return dt.isoformat()
+            return str(dt)
+        
+        
+        #Convert user data to a safe JSON Serializable dict
         data = {
             'id': self.id,
-            'username': self.username,
-            'email': self.email,
-            'first_name': self.first_name,
-            'last_name': self.last_name,
-            'phone_number': self.phone_number,
-            'full_name': self.full_name,
-            'is_active': self.is_active,
-            'is_admin': self.is_admin,
-            'is_verified': self.is_verified,
-            'last_login': self.last_login.isoformat() if self.last_login else None,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'username': str(self.username) if self.username else None,
+            'email': str(self.email) if self.email else None,
+            'first_name': str(self.first_name) if self.first_name else None,
+            'last_name': str(self.last_name) if self.last_name else None,
+            'phone_number': str(self.phone_number) if self.phone_number else None,
+            'full_name': str(self.full_name),
+            'is_active': bool(self.is_active),
+            'is_admin': bool(self.is_admin),
+            'is_verified': bool(self.is_verified),
+            'last_login': safe_isoformat(self.last_login),
+            'created_at': safe_isoformat(self.created_at),
+            'updated_at': safe_isoformat(self.updated_at)
         }
         
         if include_relationships:
