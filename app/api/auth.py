@@ -54,7 +54,6 @@ def register():
             # Basic profile information
             first_name=data.get('first_name', ''),
             last_name=data.get('last_name', ''),
-            display_name=data.get('display_name', ''),
             phone_number=data.get('phone_number', ''),
             timezone=data.get('timezone', 'UTC'),
             
@@ -64,11 +63,9 @@ def register():
             
             # Default AI settings
             ai_enabled=data.get('ai_enabled', True),
-            ai_personality=data.get('ai_personality' ),
-            ai_instructions=data.get('ai_instructions'),
-            
-            # SignalWire configuration (optional during registration)
-            signalwire_phone_number=data.get('signalwire_phone_number'),
+            ai_personality=data.get('ai_personality', 'Seductive mistress, flirty and fun.  Keep responses short.  Use emojis'),
+            ai_instructions=data.get('ai_instructions','Flirty, short, polite responses.'),
+                    
             signalwire_project_id=data.get('signalwire_project_id'),
             signalwire_auth_token=data.get('signalwire_auth_token'),
             signalwire_space_url=data.get('signalwire_space_url'),
@@ -76,6 +73,10 @@ def register():
         
         # Set password
         user.set_password(data['password'])
+        
+        #Adding the signalwire phone number
+        if 'signalwire_phone_number' in data:
+            user.signalwire_phone_number=data['signalwire_phone_number']
         
         # Set default business hours if not provided
         if 'business_hours' in data:
