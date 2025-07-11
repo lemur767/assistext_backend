@@ -91,7 +91,7 @@ def register():
     
         
         db.session.add(user)
-        db.session.commit()
+        db.session.flush()
         
         # Generate tokens
         access_token = create_access_token(
@@ -103,7 +103,9 @@ def register():
             expires_delta=timedelta(days=30)
         )
         
+        
         current_app.logger.info(f"New user registered: {user.username} ({user.email})")
+        db.session.commit()
         
         return jsonify({
             'success': True,
@@ -151,7 +153,7 @@ def login():
        # user.reset_monthly_count_if_needed()
         
         
-        db.session.commit()
+        
         
         # Generate tokens
         access_token = create_access_token(
@@ -162,6 +164,8 @@ def login():
             identity=user.id,
             expires_delta=timedelta(days=30)
         )
+        
+        db.session.commit()
         
         current_app.logger.info(f"User logged in: {user.username}")
         

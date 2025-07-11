@@ -75,14 +75,13 @@ class User(db.Model):
         return self.payment_methods.filter_by(is_default=True, status='active').first()
     
     def to_dict(self, include_relationships=False):
+        
         def safe_isoformat(dt):
             if dt is None:
                 return None
             if hasattr(dt, 'isoformat'):
                 return dt.isoformat()
             return str(dt)
-        
-        
         #Convert user data to a safe JSON Serializable dict
         data = {
             'id': self.id,
@@ -101,16 +100,46 @@ class User(db.Model):
         }
         
         if include_relationships:
-            data.update({
-                'subscription': self.get_active_subscription().to_dict() if self.get_active_subscription() else None,
-                'payment_methods': [pm.to_dict() for pm in self.payment_methods.filter_by(status='active').all()],
-                'subscription_count': self.subscriptions.count(),
-                'payment_method_count': self.payment_methods.filter_by(status='active').count(),
-                'message_count': self.messages.count(),
-                'client_count': self.clients.count()
-            })
-        
+            try:
+                # Get counts safely
+                subscription_count = 0
+                payment_method_count = 0
+                message_count = 0
+                client_count = 0
+                
+                # Only access relationships if user is in session
+                if self in db.session:
+                    subscription_count = self.subscriptions.count()
+                    payment_method_count = self.payment_methods.filter_by(status='active').count() if hasattr(self, 'payment_methods') else 0
+                    message_count = self.messages.count()
+                    client_count = self.clients.count()
+                
+                data.update({
+                    'subscription_count': int(subscription_count),
+                    'payment_method_count': int(payment_method_count),
+                    'message_count': int(message_count),
+                    'client_count': int(client_count)
+                })
+                
+            except Exception as e:
+                # If relationship access fails, just skip it
+                data['relationship_error'] = 'Unable to load relationship data'
+                
         return data
     
+    def to_dict_safe(self):
+     
+        return {
+            'id': self.id,
+            'username': str(self.username),
+            'email': str(self.email),
+            'first_name': str(self.first_name) if self.first_name else '',
+            'last_name': str(self.last_name) if self.last_name else '',
+            'full_name': str(self.full_name),
+            'is_active': bool(self.is_active),
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+    
+     
     def __repr__(self):
         return f'<User {self.username}>'
