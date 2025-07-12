@@ -10,20 +10,89 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def configure_cors(app):
-   
-    CORS(app, 
-         origins=[
-             "http://localhost:3000",
-             "http://localhost:3001", 
-             "http://localhost:5173",
-             "https://assitext.ca",
-             "https://www.assitext.ca"
+    """
+    Configure CORS with proper settings for all environments
+    """
+    # Determine environment
+    environment = os.getenv('FLASK_ENV', 'development')
+    
+    if environment == 'development':
+        # Development: Allow localhost on common ports
+        allowed_origins = [
+            "http://localhost:3000",    # Create React App default
+            "http://localhost:5173",    # Vite default
+            "http://localhost:3001",    # Alternative port
+            "http://localhost:8080",    # Alternative port
+            "http://127.0.0.1:3000",    # Local IP
+            "http://127.0.0.1:5173",    # Local IP Vite
+        ]
+        
+        print(f"🔧 CORS configured for DEVELOPMENT with origins: {allowed_origins}")
+        
+    else:
+        # Production: Only allow your actual domains
+        allowed_origins = [
+            "https://assitext.ca",
+            "https://www.assitext.ca",
+            "https://backend.assitext.ca",
+        ]
+        
+        print(f"🔒 CORS configured for PRODUCTION with origins: {allowed_origins}")
+    
+    # Configure CORS with comprehensive settings
+    CORS(app,
+         origins=allowed_origins,
+         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+         allow_headers=[
+             'Content-Type',
+             'Authorization', 
+             'X-Requested-With',
+             'Accept',
+             'Origin',
+             'X-CSRF-Token',
+             'X-Request-ID'
+         ],
+         expose_headers=[
+             'Content-Range',
+             'X-Content-Range',
+             'X-Total-Count'
          ],
          supports_credentials=True,
-         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-         allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
-         max_age=86400
-    ) 
+         max_age=86400  # 24 hours for preflight cache
+    )
+    
+    # Add manual OPTIONS handler for stubborn endpoints
+    @app.before_request
+    def handle_preflight():
+        from flask import request, make_response
+        
+        if request.method == "OPTIONS":
+            origin = request.headers.get('Origin')
+            
+            if origin in allowed_origins:
+                response = make_response()
+                response.headers.add("Access-Control-Allow-Origin", origin)
+                response.headers.add('Access-Control-Allow-Headers', 
+                                   'Content-Type,Authorization,X-Requested-With,Accept,Origin')
+                response.headers.add('Access-Control-Allow-Methods', 
+                                   'GET,PUT,POST,DELETE,OPTIONS,PATCH')
+                response.headers.add('Access-Control-Allow-Credentials', 'true')
+                response.headers.add('Access-Control-Max-Age', '86400')
+                return response
+    
+    # Add CORS headers to all responses
+    @app.after_request
+    def after_request(response):
+        from flask import request
+        
+        origin = request.headers.get('Origin')
+        if origin in allowed_origins:
+            response.headers.add('Access-Control-Allow-Origin', origin)
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+        
+        return response
+    
+    return app
     
 
 def create_app(config_name=os.getenv('FLASK_ENV','production')):
@@ -32,22 +101,14 @@ def create_app(config_name=os.getenv('FLASK_ENV','production')):
     
     # Create Flask app
     app = Flask(__name__)
-   
+    configure_cors(app) 
+    configure_app(app, config_name)
+    
     
     print(f"✅ Flask app created: {type(app)}")
     
-    configure_cors(app)       
-    # Load config safely
-    configure_app(app, config_name)
- 
-    
-    
-    # Initialize extensions
-    initialize_extensions(app)
-    
-    # Import models after extensions are initialized
-    # This prevents circular imports
-    
+    initialize_extensions(app)     
+      
     with app.app_context():
         import_models()
     

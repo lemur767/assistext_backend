@@ -52,7 +52,7 @@ class Config:
     CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://AssisText2025!Redis:@172.234.219.10:6379/0')
     
     # Redis Configuration
-    REDIS_URL = os.environ.get('REDIS_URL', 'redis://AssisText2025!Redis:@172.234.219.10:6379/0')
+    REDIS_URL = os.environ.get('REDIS_URL', 'redis://AssisText2025Redis:@172.234.219.10:6379/0')
     
     # Rate Limiting Configuration
     RATELIMIT_STORAGE_URL = os.environ.get('RATELIMIT_STORAGE_URL', 'redis://AssisText2025!Redis:@172.234.219.10:6379/1')
