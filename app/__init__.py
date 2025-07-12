@@ -1,16 +1,30 @@
-# app/__init__.py
-"""
-Flask application factory
-Fixed to prevent circular imports and duplicate blueprint registrations
-"""
+
+
 import logging
 import os
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 from flask_cors import CORS
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def configure_cors(app):
+   
+    CORS(app, 
+         origins=[
+             "http://localhost:3000",
+             "http://localhost:3001", 
+             "http://localhost:5173",
+             "https://assitext.ca",
+             "https://www.assitext.ca"
+         ],
+         supports_credentials=True,
+         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+         allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+         max_age=86400
+    ) 
+    
 
 def create_app(config_name=os.getenv('FLASK_ENV','production')):
     
@@ -25,8 +39,7 @@ def create_app(config_name=os.getenv('FLASK_ENV','production')):
     configure_cors(app)       
     # Load config safely
     configure_app(app, config_name)
-    
-    #configure_cors(app)
+ 
     
     
     # Initialize extensions
@@ -74,31 +87,6 @@ def configure_app(app, config_name):
         app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'xbaxf2xfflx16x95xcaxb3xdfxe6xb5!x1excaxd6x15Cxd7x97x08xb9x97x8exf5BpSx13')
 
  
-
-def configure_cors(app):
-    """Clean, simple CORS configuration"""
-    
-    # Use flask-cors extension (simplest approach)
-    CORS(app, 
-         origins=[
-             "http://localhost:3000",
-             "http://localhost:3001", 
-             "http://localhost:5173",
-             "http://127.0.0.1:3000",
-             "http://127.0.0.1:3001",
-             "http://127.0.0.1:5173",
-             "https://assitext.ca",
-             "https://www.assitext.ca",
-             "https://app.assitext.ca"
-         ],
-         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-         allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
-         supports_credentials=True,
-         max_age=86400
-    ) 
-   
-
-
 
 def initialize_extensions(app):
     print("🔧 Initializing extensions...")
