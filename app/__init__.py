@@ -62,10 +62,25 @@ def create_app(config_name=os.getenv('FLASK_ENV','production')):
     @app.before_request
     def handle_preflight():
         if request.method == "OPTIONS":
-            response = jsonify({'status': 'ok'})
-            response.headers.add("Access-Control-Allow-Origin", "*")
-            response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization")
-            response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
+            from flask import jsonify
+            response = jsonify({'status': 'ok'})  # ✅ Properly define response
+            origin = request.headers.get('Origin')
+            
+            # Define allowed origins
+            allowed_origins = [
+                "http://localhost:3000",
+                "http://localhost:3001", 
+                "http://localhost:5173",
+                "https://assitext.ca",
+                "https://www.assitext.ca"
+            ]
+        
+        if origin in allowed_origins:
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS,PATCH'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-Requested-With,Accept,Origin'
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+        
         return response
 
     @app.after_request  
