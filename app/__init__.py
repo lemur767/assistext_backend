@@ -18,18 +18,11 @@ def create_app(config_name=os.getenv('FLASK_ENV','production')):
     
     # Create Flask app
     app = Flask(__name__)
-    
-    CORS(app, origins=[
-    "http://localhost:3000",
-    "http://localhost:3001", 
-    "http://localhost:5173",
-    "https://assitext.ca",
-    "https://www.assitext.ca"
-], supports_credentials=True)
+   
     
     print(f"✅ Flask app created: {type(app)}")
     
-       
+    configure_cors(app)       
     # Load config safely
     configure_app(app, config_name)
     
@@ -59,39 +52,7 @@ def create_app(config_name=os.getenv('FLASK_ENV','production')):
     def health_check():
         return jsonify({'status': 'healthy', 'message': 'API is running'})
           
-    @app.before_request
-    def handle_preflight():
-        if request.method == "OPTIONS":
-            from flask import jsonify
-            response = jsonify({'status': 'ok'})  # ✅ Properly define response
-            origin = request.headers.get('Origin')
-            
-            # Define allowed origins
-            allowed_origins = [
-                "http://localhost:3000",
-                "http://localhost:3001", 
-                "http://localhost:5173",
-                "https://assitext.ca",
-                "https://www.assitext.ca"
-            ]
-        
-        if origin in allowed_origins:
-            response.headers['Access-Control-Allow-Origin'] = origin
-            response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS,PATCH'
-            response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-Requested-With,Accept,Origin'
-            response.headers['Access-Control-Allow-Credentials'] = 'true'
-        
-        return response
-
-    @app.after_request  
-    def after_request(response):
-        origin = request.headers.get('Origin')
-        if origin:
-            response.headers.add('Access-Control-Allow-Origin', origin)
-            response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
-            response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-            response.headers.add('Access-Control-Allow-Credentials', 'true')
-        return response
+ 
     
     print("✅ Flask app fully initialized")
     return app
@@ -114,6 +75,28 @@ def configure_app(app, config_name):
 
  
 
+def configure_cors(app):
+    """Clean, simple CORS configuration"""
+    
+    # Use flask-cors extension (simplest approach)
+    CORS(app, 
+         origins=[
+             "http://localhost:3000",
+             "http://localhost:3001", 
+             "http://localhost:5173",
+             "http://127.0.0.1:3000",
+             "http://127.0.0.1:3001",
+             "http://127.0.0.1:5173",
+             "https://assitext.ca",
+             "https://www.assitext.ca",
+             "https://app.assitext.ca"
+         ],
+         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+         allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+         supports_credentials=True,
+         max_age=86400
+    ) 
+   
 
 
 
