@@ -12,29 +12,36 @@ from flask_cors import CORS
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def create_app(config_name=None):
-    """
-    Application factory pattern
-    """
+def create_app(config_name=os.getenv('FLASK_ENV','production')):
+    
     print("🚀 Creating Flask app...")
     
     # Create Flask app
     app = Flask(__name__)
+    
+    CORS(app, origins=[
+    "http://localhost:3000",
+    "http://localhost:3001", 
+    "http://localhost:5173",
+    "https://assitext.ca",
+    "https://www.assitext.ca"
+], supports_credentials=True)
+    
     print(f"✅ Flask app created: {type(app)}")
     
-    # Load configuration
-    if config_name is None:
-        config_name = os.getenv('FLASK_ENV', 'production')
-    
+       
     # Load config safely
     configure_app(app, config_name)
     
-    configure_cors(app)
+    #configure_cors(app)
+    
+    
     # Initialize extensions
     initialize_extensions(app)
     
     # Import models after extensions are initialized
     # This prevents circular imports
+    
     with app.app_context():
         import_models()
     
@@ -51,7 +58,7 @@ def create_app(config_name=None):
     @app.route('/health')
     def health_check():
         return jsonify({'status': 'healthy', 'message': 'API is running'})
-      # ✅ CORS FIX: Add options handler for all routes
+          
     @app.before_request
     def handle_preflight():
         if request.method == "OPTIONS":
@@ -59,16 +66,16 @@ def create_app(config_name=None):
             response.headers.add("Access-Control-Allow-Origin", "*")
             response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization")
             response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
-            return response
+        return response
 
     @app.after_request  
     def after_request(response):
         origin = request.headers.get('Origin')
         if origin:
             response.headers.add('Access-Control-Allow-Origin', origin)
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
+            response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+            response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response
     
     print("✅ Flask app fully initialized")
@@ -76,7 +83,7 @@ def create_app(config_name=None):
 
 
 def configure_app(app, config_name):
-    """Configure the Flask app"""
+    
     try:
         from app.config import get_config
         config = get_config(config_name)
@@ -86,67 +93,20 @@ def configure_app(app, config_name):
         print(f"❌ Configuration failed: {e}")
         # Set basic defaults
         app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'eGJheGYyeGZmbHgxNng5NXhjYXhiM3hkZnhlNnhiOHhiOXg5N3g4ZXhmNUJwU3gxMw==')
-        app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://app_user:Assistext2025Secure@localhost/assistext_prod')
+        app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://app_user:Assistext2025Secure@localhost:5432/assistext_prod')
         app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
         app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'xbaxf2xfflx16x95xcaxb3xdfxe6xb5!x1excaxd6x15Cxd7x97x08xb9x97x8exf5BpSx13')
 
-def configure_cors(app):  
+ 
 
-    print("🔧 Configuring CORS...")
-    
-    # Development origins
-    dev_origins = [
-        "http://localhost:3000",      # React dev server
-        "http://localhost:5173",      # Vite dev server
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173"
-    ]
-    
-    # Production origins
-    prod_origins = [
-        "https://assitext.ca",
-        "https://www.assitext.ca",
-        "https://app.assitext.ca"
-    ]
-    
-    # All allowed origins
-    allowed_origins = dev_origins + prod_origins
-    
-    # Configure CORS with comprehensive settings
-    CORS(app, 
-         origins=allowed_origins,
-         allow_headers=[
-             "Content-Type",
-             "Authorization", 
-             "X-Requested-With",
-             "Accept",
-             "Origin"
-         ],
-         methods=[
-             "GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"
-         ],
-         supports_credentials=True,
-         max_age=86400,  # 24 hours
-         vary_header=True
-    )
-    
-    print(f"✅ CORS configured for origins: {allowed_origins}")
+
 
 
 def initialize_extensions(app):
-    """Initialize Flask extensions"""
     print("🔧 Initializing extensions...")
     try:
         from app.extensions import db, migrate, jwt
-        
-        # Initialize CORS
-        CORS(app, origins=[
-            "http://localhost:3000", 
-            "http://localhost:5173",
-            "https://assitext.ca",
-            "https://www.assitext.ca"
-        ])
-        
+                        
         # Initialize database
         db.init_app(app)
         migrate.init_app(app, db)
@@ -161,10 +121,7 @@ def initialize_extensions(app):
 
 
 def import_models():
-    """
-    Import models after extensions are initialized
-    This prevents circular imports and ensures proper table creation
-    """
+    
     try:
         # Import all models in the correct order
         from app.models import (
@@ -180,7 +137,7 @@ def import_models():
 
 
 def setup_jwt_handlers(app):
-    """Set up JWT error handlers"""
+    
     try:
         from app.extensions import jwt
         
@@ -202,7 +159,7 @@ def setup_jwt_handlers(app):
 
 
 def setup_error_handlers(app):
-    """Set up error handlers"""
+    
     try:
         @app.errorhandler(404)
         def not_found(error):
@@ -218,10 +175,7 @@ def setup_error_handlers(app):
 
 
 def register_blueprints(app):
-    """
-    Register blueprints safely
-    Fixed to prevent duplicate registrations and circular imports
-    """
+    
     print("🔧 Registering blueprints...")
     
     # Track registered blueprints to prevent duplicates
