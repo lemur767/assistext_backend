@@ -5,8 +5,38 @@ from flask_jwt_extended import (
 )
 from app.models.user import User
 from app.extensions import db
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import re
+import json
+
+from decimal import Decimal
+import base64
+
+
+
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        if isinstance(obj, bytes):
+            try:
+                return obj.decode('utf-8')
+            except UnicodeDecodeError:
+                return base64.b64encode(obj).decode('ascii')
+        if hasattr(obj, 'to_dict'):
+            return obj.to_dict()
+        return super().default(obj)
+
+def safe_jsonify(data, status_code=200):
+    try:
+        json_string = json.dumps(data, cls=CustomJSONEncoder)
+        parsed_data = json.loads(json_string)
+        response = jsonify(parsed_data)
+        response.status_code = status_code
+        return response
+    except Exception as e:
+        current_app.logger.error(f"JSON serialization failed: {e}")
+        return jsonify({'error': 'Response serialization failed'}), 500
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -171,14 +201,13 @@ def login():
         db.session.commit()
         
         current_app.logger.info(f"User logged in: {user.username}")
-        
-        return jsonify({
+        response_data = {
+            'user': user.to_dict(),
             'success': True,
-            'message': 'Login successful',
             'access_token': access_token,
             'refresh_token': refresh_token,
-            'user': user.to_dict()
-        }), 200
+        }
+        return safe_jsonify(response_data), 200
         
     except Exception as e:
         db.session.rollback()
