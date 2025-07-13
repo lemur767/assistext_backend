@@ -41,25 +41,25 @@ def configure_cors(app):
     
     # Configure CORS with comprehensive settings
     # CORS(app,
-         origins=allowed_origins,
-         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-         allow_headers=[
-             'Content-Type',
-             'Authorization', 
-             'X-Requested-With',
-             'Accept',
-             'Origin',
-             'X-CSRF-Token',
-             'X-Request-ID'
-         ],
-         expose_headers=[
-             'Content-Range',
-             'X-Content-Range',
-             'X-Total-Count'
-         ],
-         supports_credentials=True,
-         max_age=86400  # 24 hours for preflight cache
-    )
+     #    origins=allowed_origins,
+      #   methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+       #  allow_headers=[
+        #     'Content-Type',
+         #    'Authorization', 
+          #   'X-Requested-With',
+          #   'Accept',
+          #   'Origin',
+           #  'X-CSRF-Token',
+           #  'X-Request-ID'
+       #  ],
+        # expose_headers=[
+         #    'Content-Range',
+         #    'X-Content-Range',
+          #   'X-Total-Count'
+    #     ],
+     #    supports_credentials=True,
+      #   max_age=86400  # 24 hours for preflight cache
+   # )
     
     # Add manual OPTIONS handler for stubborn endpoints
     @app.before_request
