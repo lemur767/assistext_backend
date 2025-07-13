@@ -174,7 +174,7 @@ def import_models():
         from app.models import (
             User, Subscription, SubscriptionPlan, Message, Client,
             Invoice, InvoiceItem, PaymentMethod, Payment,
-            CreditTransaction, BillingSettings, UsageRecord,
+            CreditTransaction, BillingSettings, UseageRecord,
             ActivityLog, NotificationLog, MessageTemplate
         )
         print("✅ Models imported successfully")
