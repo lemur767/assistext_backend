@@ -3,7 +3,7 @@
 import logging
 import os
 from flask import Flask, jsonify
-# from flask_cors import CORS
+# # from flask_cors import CORS
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -40,7 +40,7 @@ def configure_cors(app):
         print(f"🔒 CORS configured for PRODUCTION with origins: {allowed_origins}")
     
     # Configure CORS with comprehensive settings
-    # CORS(app,
+    # # CORS(app,
      #    origins=allowed_origins,
       #   methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
        #  allow_headers=[
