@@ -283,7 +283,7 @@ def send_response(user, response_text, recipient_number, related_message_sid=Non
         db.session.flush()  # Get the ID
         
         # TODO: Send via actual SignalWire API
-        # from app.utils.signalwire_helpers import send_sms
+        # from app.services.sms_service import send_sms
         # 
         # signalwire_message = send_sms(
         #     from_number=user.signalwire_phone_number,

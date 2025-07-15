@@ -3,7 +3,7 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models.user import User
 from app.extensions import db
-#from app.utils.signalwire_helpers import get_signalwire_client, seac
+#from app.services.sms_service import get_signalwire_client, seac
 from marshmallow import Schema, fields, validate, ValidationError
 import logging
 

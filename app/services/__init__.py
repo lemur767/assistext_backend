@@ -75,3 +75,61 @@ class ServiceManager:
         """Get billing service functions."""
         return get_billing_service()
  
+
+def get_sms_service():
+    """Lazy import SMS service to avoid circular imports"""
+    from app.services.sms_service import sms_service
+    return sms_service
+
+# Add to ServiceManager
+class ServiceManager:
+    """Manager class for all services."""
+    
+    @staticmethod
+    def get_sms_service():
+        """Get SMS service instance."""
+        return get_sms_service()
+    
+    @staticmethod
+    def get_message_handler():
+        """Get message handler functions."""
+        return get_message_handler()
+    
+    @staticmethod
+    def get_ai_service():
+        """Get AI service functions."""
+        return get_ai_service()
+    
+    @staticmethod
+    def get_billing_service():
+        """Get billing service functions."""
+        return get_billing_service()
+
+def get_sms_service():
+    """Lazy import SMS service to avoid circular imports"""
+    from app.services.sms_service import sms_service
+    return sms_service
+
+# Add to ServiceManager
+class ServiceManager:
+    """Manager class for all services."""
+    
+    @staticmethod
+    def get_sms_service():
+        """Get SMS service instance."""
+        return get_sms_service()
+    
+    @staticmethod
+    def get_message_handler():
+        """Get message handler functions."""
+        return get_message_handler()
+    
+    @staticmethod
+    def get_ai_service():
+        """Get AI service functions."""
+        return get_ai_service()
+    
+    @staticmethod
+    def get_billing_service():
+        """Get billing service functions."""
+        return get_billing_service()

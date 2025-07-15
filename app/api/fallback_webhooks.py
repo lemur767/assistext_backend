@@ -3,7 +3,7 @@ Fallback Webhook Handler for SignalWire
 app/api/fallback_webhooks.py - Backup webhook endpoints in case primary fails
 """
 from flask import Blueprint, request, Response, jsonify, current_app
-from app.utils.signalwire_helpers import (
+from app.services.sms_service import (
     validate_signalwire_signature,
     create_cxml_response,
     create_voice_cxml_response,
@@ -177,7 +177,7 @@ def update_main_webhook_implementation():
     """
     example_sms_handler = '''
 # Updated SMS handler using SignalWire utilities
-from app.utils.signalwire_helpers import (
+from app.services.sms_service import (
     validate_signalwire_signature,
     create_cxml_response,
     parse_signalwire_webhook_data,

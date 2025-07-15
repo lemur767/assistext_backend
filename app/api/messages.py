@@ -359,7 +359,7 @@ def send_message():
         # Send via SignalWire (implement this based on your SignalWire setup)
         try:
             # TODO: Implement actual SignalWire sending
-            # from app.utils.signalwire_helpers import send_sms
+            # from app.services.sms_service import send_sms
             # signalwire_message = send_sms(
             #     from_number=user.signalwire_phone_number,
             #     to_number=to_number,
