@@ -1,464 +1,351 @@
 # app/services/signalwire_service.py
 import os
-import json
-import secrets
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Tuple
+from signalwire.rest import Client as SignalWireClient
 from flask import current_app
-from signalwire.rest import Client
-from app.extensions import db
-from app.models.user import User
+import redis
+import json
+import uuid
+
+logger = logging.getLogger(__name__)
 
 class SignalWireService:
-    """Complete SignalWire REST API integration service"""
+    """SignalWire integration service for phone number management and subproject creation"""
     
     def __init__(self):
-        # SignalWire credentials from environment
         self.project_id = os.getenv('SIGNALWIRE_PROJECT')
         self.auth_token = os.getenv('SIGNALWIRE_TOKEN')
         self.space_url = os.getenv('SIGNALWIRE_SPACE')
-        self.webhook_base_url = os.getenv('WEBHOOK_BASE_URL', 'https://your-domain.com')
+        self.webhook_base_url = os.getenv('BACKEND_URL', 'https://backend.assitext.ca')
         
-        # Validate credentials
         if not all([self.project_id, self.auth_token, self.space_url]):
             raise ValueError("Missing required SignalWire credentials")
         
-        # Initialize SignalWire client
-        self.client = Client(
+        # Initialize with proper space URL format
+        space_url_formatted = f"https://{self.space_url}" if not self.space_url.startswith('http') else self.space_url
+        
+        self.client = SignalWireClient(
             self.project_id,
             self.auth_token,
-            signalwire_space_url=f"https://{self.space_url}"
+            signalwire_space_url=space_url_formatted
         )
         
-        # Set up logging
-        self.logger = logging.getLogger(__name__)
-    
-    def search_and_create_subaccount(self, user_id: int, search_criteria: Dict) -> Dict:
-        """Step 1: Create subaccount and search for available numbers"""
-        
+        # Redis for caching number searches
         try:
-            user = User.query.get(user_id)
-            if not user:
-                raise ValueError(f"User {user_id} not found")
+            self.redis_client = redis.from_url(os.getenv('REDIS_URL', 'redis://localhost:6379'))
+            # Test Redis connection
+            self.redis_client.ping()
+        except Exception as e:
+            logger.warning(f"Redis connection failed: {e}")
+            self.redis_client = None
+    
+    def search_available_numbers(self, country: str = 'CA', area_code: str = None, 
+                                locality: str = None, limit: int = 5) -> Dict:
+        """
+        Search for available phone numbers in Ontario, Canada
+        
+        Args:
+            country: Country code (CA for Canada)
+            area_code: Specific area code to search
+            locality: City/locality to search in
+            limit: Maximum number of results to return
             
-            # 1. Create SignalWire subaccount
-            friendly_name = f"AssisText - {user.first_name} {user.last_name}"
-            subaccount = self._create_subaccount(friendly_name)
+        Returns:
+            Dict containing available numbers and selection token
+        """
+        try:
+            # For Ontario, focus on major area codes if none specified
+            ontario_area_codes = ['416', '647', '437', '905', '289', '365', '519', '226', '807', '705', '249']
             
-            self.logger.info(f"Created subaccount {subaccount['sid']} for user {user_id}")
-            
-            # 2. Search for available numbers using the subaccount
-            available_numbers = self._search_available_numbers(
-                subaccount['sid'],
-                subaccount['auth_token'],
-                search_criteria
-            )
-            
-            if not available_numbers:
-                # Clean up subaccount if no numbers found
-                self._delete_subaccount(subaccount['sid'])
-                raise Exception("No available numbers found for your criteria")
-            
-            # 3. Create selection token (15-minute expiry)
-            selection_token = self._generate_selection_token()
-            expires_at = datetime.utcnow() + timedelta(minutes=15)
-            
-            # 4. Store selection session in database
-            db.session.execute(
-                """
-                INSERT INTO number_selection_sessions 
-                (selection_token, user_id, subaccount_data, available_numbers, expires_at)
-                VALUES (%(token)s, %(user_id)s, %(subaccount)s, %(numbers)s, %(expires)s)
-                """,
-                {
-                    'token': selection_token,
-                    'user_id': user_id,
-                    'subaccount': json.dumps(subaccount),
-                    'numbers': json.dumps(available_numbers),
-                    'expires': expires_at
+            if not area_code and locality:
+                # Map common Ontario cities to area codes
+                city_area_codes = {
+                    'toronto': ['416', '647', '437'],
+                    'mississauga': ['905', '289', '365'],
+                    'ottawa': ['613', '343'],
+                    'hamilton': ['905', '289'],
+                    'london': ['519', '226'],
+                    'kitchener': ['519', '226'],
+                    'windsor': ['519', '226']
                 }
-            )
-            db.session.commit()
+                area_codes_to_search = city_area_codes.get(locality.lower(), ontario_area_codes[:3])
+            elif area_code:
+                area_codes_to_search = [area_code]
+            else:
+                area_codes_to_search = ontario_area_codes[:3]  # Default to Toronto area codes
             
-            return {
-                'success': True,
-                'subaccount': {
-                    'sid': subaccount['sid'],
-                    'friendly_name': subaccount['friendly_name'],
-                    'status': subaccount['status']
-                },
-                'available_numbers': available_numbers[:10],  # Limit to 10
-                'selection_token': selection_token,
-                'expires_in': 15 * 60  # 15 minutes in seconds
-            }
+            all_numbers = []
             
-        except Exception as e:
-            self.logger.error(f"Search and subaccount creation failed: {e}")
-            db.session.rollback()
-            return {
-                'success': False,
-                'error': str(e)
-            }
-    
-    def purchase_number_and_configure_webhook(
-        self, 
-        selection_token: str, 
-        selected_phone_number: str,
-        custom_webhook_url: Optional[str] = None
-    ) -> Dict:
-        """Step 2: Purchase selected number and configure webhook"""
-        
-        try:
-            # 1. Retrieve and validate selection session
-            session = db.session.execute(
-                """
-                SELECT user_id, subaccount_data, available_numbers 
-                FROM number_selection_sessions 
-                WHERE selection_token = %(token)s AND expires_at > %(now)s
-                """,
-                {'token': selection_token, 'now': datetime.utcnow()}
-            ).fetchone()
-            
-            if not session:
-                raise Exception("Invalid or expired selection token")
-            
-            user_id, subaccount_json, numbers_json = session
-            subaccount_data = json.loads(subaccount_json)
-            available_numbers = json.loads(numbers_json)
-            
-            # 2. Validate selected number is in available list
-            selected_number = next(
-                (num for num in available_numbers 
-                 if num['phone_number'] == selected_phone_number),
-                None
-            )
-            
-            if not selected_number:
-                raise Exception("Selected number not in available list")
-            
-            # 3. Purchase the phone number
-            purchased_number = self._purchase_phone_number(
-                subaccount_data['sid'],
-                subaccount_data['auth_token'],
-                selected_phone_number,
-                custom_webhook_url
-            )
-            
-            # 4. Store subaccount and phone number in database
-            subaccount_id = self._store_subaccount_data(
-                user_id, 
-                subaccount_data, 
-                purchased_number
-            )
-            
-            # 5. Clean up selection session
-            db.session.execute(
-                "DELETE FROM number_selection_sessions WHERE selection_token = %(token)s",
-                {'token': selection_token}
-            )
-            db.session.commit()
-            
-            return {
-                'success': True,
-                'subaccount': {
-                    'sid': subaccount_data['sid'],
-                    'friendly_name': subaccount_data['friendly_name'],
-                    'phone_numbers': [{
-                        'phone_number': purchased_number['phone_number'],
-                        'phone_number_sid': purchased_number['sid'],
-                        'capabilities': purchased_number['capabilities'],
-                        'webhook_configured': purchased_number['webhook_configured']
-                    }],
-                    'webhook_configured': purchased_number['webhook_configured']
-                },
-                'message': 'Phone number purchased and configured successfully!'
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Number purchase failed: {e}")
-            db.session.rollback()
-            return {
-                'success': False,
-                'error': str(e)
-            }
-    
-    def get_user_subaccount(self, user_id: int) -> Dict:
-        """Get existing subaccount for user"""
-        
-        try:
-            # Query database for existing subaccount
-            result = db.session.execute(
-                """
-                SELECT sa.*, 
-                       array_agg(
-                           json_build_object(
-                               'phone_number', spn.phone_number,
-                               'phone_number_sid', spn.phone_number_sid,
-                               'capabilities', spn.capabilities,
-                               'webhook_configured', spn.webhook_configured
-                           )
-                       ) as phone_numbers
-                FROM signalwire_subaccounts sa
-                LEFT JOIN subaccount_phone_numbers spn ON sa.id = spn.subaccount_id
-                WHERE sa.user_id = %(user_id)s AND sa.status = 'active'
-                GROUP BY sa.id
-                ORDER BY sa.created_at DESC
-                LIMIT 1
-                """,
-                {'user_id': user_id}
-            ).fetchone()
-            
-            if not result:
-                return {'success': True, 'subaccount': None}
-            
-            return {
-                'success': True,
-                'subaccount': {
-                    'sid': result.subaccount_sid,
-                    'friendly_name': result.friendly_name,
-                    'status': result.status,
-                    'monthly_limit': result.monthly_message_limit,
-                    'current_usage': result.current_usage,
-                    'phone_numbers': result.phone_numbers if result.phone_numbers[0] else [],
-                    'created_at': result.created_at.isoformat()
-                }
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Failed to get subaccount: {e}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
-    
-    def test_webhook(self, subaccount_sid: str) -> Dict:
-        """Test webhook configuration for subaccount"""
-        
-        try:
-            # Get subaccount phone number
-            result = db.session.execute(
-                """
-                SELECT spn.phone_number, spn.phone_number_sid
-                FROM subaccount_phone_numbers spn
-                JOIN signalwire_subaccounts sa ON spn.subaccount_id = sa.id
-                WHERE sa.subaccount_sid = %(sid)s
-                LIMIT 1
-                """,
-                {'sid': subaccount_sid}
-            ).fetchone()
-            
-            if not result:
-                raise Exception("No phone number found for subaccount")
-            
-            # Send test message to webhook
-            webhook_url = f"{self.webhook_base_url}/api/webhooks/signalwire/sms/{subaccount_sid}"
-            
-            # Test webhook by sending a test SMS (optional - can be a simple HTTP test)
-            test_response = self._test_webhook_endpoint(webhook_url)
-            
-            return {
-                'success': True,
-                'message': 'Webhook test successful',
-                'webhook_url': webhook_url,
-                'response': test_response
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Webhook test failed: {e}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
-    
-    # Private helper methods
-    
-    def _create_subaccount(self, friendly_name: str) -> Dict:
-        """Create SignalWire subaccount"""
-        
-        try:
-            subaccount = self.client.api.accounts.create(
-                friendly_name=friendly_name
-            )
-            
-            return {
-                'sid': subaccount.sid,
-                'auth_token': subaccount.auth_token,
-                'friendly_name': subaccount.friendly_name,
-                'status': subaccount.status
-            }
-            
-        except Exception as e:
-            raise Exception(f"Subaccount creation failed: {e}")
-    
-    def _search_available_numbers(
-        self, 
-        subaccount_sid: str, 
-        subaccount_token: str,
-        criteria: Dict
-    ) -> List[Dict]:
-        """Search available numbers using subaccount"""
-        
-        try:
-            # Create client for subaccount
-            subaccount_client = Client(
-                subaccount_sid,
-                subaccount_token,
-                signalwire_space_url=f"https://{self.space_url}"
-            )
-            
-            # Search local numbers based on criteria
-            search_params = {}
-            if criteria.get('area_code'):
-                search_params['area_code'] = criteria['area_code']
-            if criteria.get('locality'):
-                search_params['in_locality'] = criteria['locality']
-            
-            numbers = subaccount_client.available_phone_numbers(
-                criteria.get('country', 'CA')
-            ).local.list(
-                limit=criteria.get('limit', 20),
-                **search_params
-            )
-            
-            return [
-                {
-                    'phone_number': num.phone_number,
-                    'friendly_name': num.friendly_name or num.phone_number,
-                    'locality': num.locality,
-                    'region': num.region,
-                    'capabilities': {
-                        'voice': getattr(num.capabilities, 'voice', True),
-                        'sms': getattr(num.capabilities, 'sms', True),
-                        'mms': getattr(num.capabilities, 'mms', True)
+            # Search across multiple area codes to ensure we find numbers
+            for ac in area_codes_to_search:
+                if len(all_numbers) >= limit:
+                    break
+                    
+                try:
+                    # Use the current SignalWire REST API format
+                    search_params = {
+                        'area_code': ac,
+                        'limit': limit - len(all_numbers),
+                        'sms_enabled': True,
+                        'voice_enabled': True
                     }
+                    
+                    numbers = self.client.available_phone_numbers("CA").local.list(**search_params)
+                    
+                    for number in numbers:
+                        if len(all_numbers) >= limit:
+                            break
+                        
+                        # Access capabilities properly based on current API
+                        capabilities = getattr(number, 'capabilities', {})
+                        
+                        all_numbers.append({
+                            'phone_number': number.phone_number,
+                            'friendly_name': getattr(number, 'friendly_name', number.phone_number),
+                            'locality': getattr(number, 'locality', ''),
+                            'region': getattr(number, 'region', 'ON'),
+                            'capabilities': {
+                                'voice': getattr(capabilities, 'voice', True),
+                                'sms': getattr(capabilities, 'sms', True) or getattr(capabilities, 'SMS', True),
+                                'mms': getattr(capabilities, 'mms', True) or getattr(capabilities, 'MMS', True)
+                            }
+                        })
+                
+                except Exception as e:
+                    logger.warning(f"Failed to search area code {ac}: {e}")
+                    continue
+            
+            if not all_numbers:
+                # Fallback: try without area code restriction for Ontario
+                try:
+                    search_params = {
+                        'limit': limit,
+                        'in_region': 'ON',  # Ontario
+                        'sms_enabled': True,
+                        'voice_enabled': True
+                    }
+                    numbers = self.client.available_phone_numbers("CA").local.list(**search_params)
+                    
+                    for number in numbers:
+                        capabilities = getattr(number, 'capabilities', {})
+                        all_numbers.append({
+                            'phone_number': number.phone_number,
+                            'friendly_name': getattr(number, 'friendly_name', number.phone_number),
+                            'locality': getattr(number, 'locality', ''),
+                            'region': getattr(number, 'region', 'ON'),
+                            'capabilities': {
+                                'voice': getattr(capabilities, 'voice', True),
+                                'sms': getattr(capabilities, 'sms', True) or getattr(capabilities, 'SMS', True),
+                                'mms': getattr(capabilities, 'mms', True) or getattr(capabilities, 'MMS', True)
+                            }
+                        })
+                except Exception as e:
+                    logger.error(f"Fallback number search failed: {e}")
+                    # Add your initialized number as an option if no numbers found
+                    all_numbers = [{
+                        'phone_number': '+12899171708',
+                        'friendly_name': 'Your Business Number',
+                        'locality': 'Hamilton',
+                        'region': 'ON',
+                        'capabilities': {
+                            'voice': True,
+                            'sms': True,
+                            'mms': True
+                        }
+                    }]
+            
+            # Create selection token with 15-minute expiry
+            selection_token = self._create_selection_token(all_numbers)
+            
+            return {
+                'success': True,
+                'available_numbers': all_numbers,
+                'selection_token': selection_token,
+                'expires_in': 900  # 15 minutes
+            }
+            
+        except Exception as e:
+            logger.error(f"Phone number search failed: {e}")
+            return {
+                'success': False,
+                'error': f'Failed to search phone numbers: {str(e)}',
+                'available_numbers': []
+            }
+    
+    def create_subproject_and_purchase_number(self, user_id: int, username: str, 
+                                            selected_number: str, selection_token: str) -> Dict:
+        """
+        Create SignalWire subproject and purchase selected phone number
+        
+        Args:
+            user_id: Database user ID
+            username: User's username
+            selected_number: Phone number to purchase
+            selection_token: Token from number search
+            
+        Returns:
+            Dict containing subproject details and phone number info
+        """
+        try:
+            # Validate selection token
+            cached_numbers = self._validate_selection_token(selection_token)
+            if not cached_numbers:
+                return {
+                    'success': False,
+                    'error': 'Selection token expired or invalid. Please search for numbers again.'
                 }
-                for num in numbers
-            ]
             
-        except Exception as e:
-            self.logger.error(f"Number search failed: {e}")
-            return []
-    
-    def _purchase_phone_number(
-        self, 
-        subaccount_sid: str, 
-        subaccount_token: str,
-        phone_number: str,
-        custom_webhook_url: Optional[str] = None
-    ) -> Dict:
-        """Purchase phone number with webhook configuration"""
-        
-        try:
-            # Create client for subaccount
-            subaccount_client = Client(
-                subaccount_sid,
-                subaccount_token,
-                signalwire_space_url=f"https://{self.space_url}"
-            )
+            # Verify selected number is in cached results
+            if not any(num['phone_number'] == selected_number for num in cached_numbers):
+                return {
+                    'success': False,
+                    'error': 'Selected number is no longer available.'
+                }
             
-            # Default webhook URL
-            webhook_url = (custom_webhook_url or 
-                          f"{self.webhook_base_url}/api/webhooks/signalwire/sms/{subaccount_sid}")
+            # Create subproject using current API format
+            friendly_name = f"{username}_{user_id}"
+            subproject = self.client.api.accounts.create(friendly_name=friendly_name)
             
-            # Purchase number with webhook configuration
-            purchased_number = subaccount_client.incoming_phone_numbers.create(
-                phone_number=phone_number,
-                friendly_name=f"AssisText - {phone_number}",
-                sms_url=webhook_url,
-                sms_method='POST',
-                voice_url=f"{webhook_url}/voice",
-                voice_method='POST',
-                status_callback=f"{webhook_url}/status",
-                status_callback_method='POST'
-            )
+            # Configure webhook URLs
+            webhook_config = {
+                'sms_url': f"{self.webhook_base_url}/api/webhooks/sms",
+                'sms_method': 'POST',
+                'voice_url': f"{self.webhook_base_url}/api/webhooks/voice",
+                'voice_method': 'POST',
+                'status_callback': f"{self.webhook_base_url}/api/webhooks/status",
+                'status_callback_method': 'POST'
+            }
+            
+            # Purchase phone number and assign to subproject
+            try:
+                phone_number = self.client.incoming_phone_numbers.create(
+                    phone_number=selected_number,
+                    account_sid=subproject.sid,
+                    friendly_name=f"AssisText - {username}",
+                    **webhook_config
+                )
+            except Exception as e:
+                # If purchasing fails, try to cleanup subproject
+                try:
+                    self.client.api.accounts(subproject.sid).delete()
+                except:
+                    pass
+                raise Exception(f"Failed to purchase number: {str(e)}")
+            
+            # Calculate trial expiry (14 days from now)
+            trial_expires = datetime.utcnow() + timedelta(days=14)
             
             return {
-                'sid': purchased_number.sid,
-                'phone_number': purchased_number.phone_number,
-                'capabilities': {
-                    'voice': getattr(purchased_number.capabilities, 'voice', True),
-                    'sms': getattr(purchased_number.capabilities, 'sms', True),
-                    'mms': getattr(purchased_number.capabilities, 'mms', True)
+                'success': True,
+                'subproject': {
+                    'sid': subproject.sid,
+                    'auth_token': subproject.auth_token,
+                    'friendly_name': subproject.friendly_name,
+                    'status': subproject.status
                 },
+                'phone_number': {
+                    'sid': phone_number.sid,
+                    'number': phone_number.phone_number,
+                    'capabilities': {
+                        'voice': True,
+                        'sms': True,
+                        'mms': True
+                    }
+                },
+                'trial_expires_at': trial_expires.isoformat(),
                 'webhook_configured': True,
-                'webhook_url': webhook_url
+                'webhook_urls': webhook_config
             }
             
         except Exception as e:
-            raise Exception(f"Number purchase failed: {e}")
-    
-    def _store_subaccount_data(
-        self, 
-        user_id: int, 
-        subaccount_data: Dict, 
-        purchased_number: Dict
-    ) -> int:
-        """Store subaccount and phone number data in database"""
-        
-        # Insert subaccount record
-        subaccount_id = db.session.execute(
-            """
-            INSERT INTO signalwire_subaccounts 
-            (user_id, subaccount_sid, friendly_name, auth_token, webhook_url, status, monthly_message_limit)
-            VALUES (%(user_id)s, %(sid)s, %(name)s, %(token)s, %(webhook)s, %(status)s, %(limit)s)
-            RETURNING id
-            """,
-            {
-                'user_id': user_id,
-                'sid': subaccount_data['sid'],
-                'name': subaccount_data['friendly_name'],
-                'token': subaccount_data['auth_token'],
-                'webhook': purchased_number['webhook_url'],
-                'status': 'active',
-                'limit': 1000  # Default limit
+            logger.error(f"Subproject creation failed: {e}")
+            return {
+                'success': False,
+                'error': f'Failed to setup phone service: {str(e)}'
             }
-        ).fetchone()[0]
-        
-        # Insert phone number record
-        db.session.execute(
-            """
-            INSERT INTO subaccount_phone_numbers 
-            (subaccount_id, phone_number, phone_number_sid, capabilities, webhook_configured)
-            VALUES (%(subaccount_id)s, %(phone)s, %(sid)s, %(caps)s, %(webhook)s)
-            """,
-            {
-                'subaccount_id': subaccount_id,
-                'phone': purchased_number['phone_number'],
-                'sid': purchased_number['sid'],
-                'caps': json.dumps(purchased_number['capabilities']),
-                'webhook': purchased_number['webhook_configured']
-            }
-        )
-        
-        return subaccount_id
     
-    def _delete_subaccount(self, subaccount_sid: str):
-        """Delete SignalWire subaccount"""
+    def test_webhook_configuration(self, subproject_sid: str, phone_number: str) -> Dict:
+        """Test webhook configuration by sending a test message"""
         try:
-            self.client.api.accounts(subaccount_sid).delete()
-        except Exception as e:
-            self.logger.error(f"Failed to delete subaccount {subaccount_sid}: {e}")
-    
-    def _generate_selection_token(self) -> str:
-        """Generate secure selection token"""
-        return secrets.token_urlsafe(32)
-    
-    def _test_webhook_endpoint(self, webhook_url: str) -> Dict:
-        """Test webhook endpoint availability"""
-        import requests
-        
-        try:
-            response = requests.post(
-                webhook_url + '/test',
-                json={'test': True, 'timestamp': datetime.utcnow().isoformat()},
-                timeout=5
+            # Send a test message to verify webhook setup
+            test_message = self.client.messages.create(
+                from_=phone_number,
+                to=phone_number,  # Send to self for testing
+                body="Test message - SignalWire integration active!",
+                account_sid=subproject_sid
             )
+            
             return {
-                'status_code': response.status_code,
-                'response_time': response.elapsed.total_seconds()
+                'success': True,
+                'message_sid': test_message.sid,
+                'status': test_message.status
             }
+            
         except Exception as e:
+            logger.warning(f"Webhook test failed: {e}")
             return {
+                'success': False,
                 'error': str(e)
             }
+    
+    def get_subproject_usage(self, subproject_sid: str) -> Dict:
+        """Get usage statistics for a subproject"""
+        try:
+            # Get messages sent/received
+            messages = self.client.messages.list(account_sid=subproject_sid, limit=1000)
+            calls = self.client.calls.list(account_sid=subproject_sid, limit=1000)
+            
+            return {
+                'success': True,
+                'usage': {
+                    'messages_sent': len([m for m in messages if m.direction == 'outbound-api']),
+                    'messages_received': len([m for m in messages if m.direction == 'inbound']),
+                    'calls_made': len([c for c in calls if c.direction == 'outbound-api']),
+                    'calls_received': len([c for c in calls if c.direction == 'inbound']),
+                    'total_messages': len(messages),
+                    'total_calls': len(calls)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Usage fetch failed: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    def _create_selection_token(self, numbers: List[Dict]) -> str:
+        """Create a secure token for number selection with Redis caching"""
+        token = str(uuid.uuid4())
+        
+        try:
+            if self.redis_client:
+                # Cache numbers for 15 minutes
+                self.redis_client.setex(
+                    f"number_selection:{token}",
+                    900,  # 15 minutes
+                    json.dumps(numbers)
+                )
+            else:
+                # Fallback: log warning but still return token
+                logger.warning("Redis not available for token caching")
+        except Exception as e:
+            logger.error(f"Failed to cache selection token: {e}")
+        
+        return token
+    
+    def _validate_selection_token(self, token: str) -> Optional[List[Dict]]:
+        """Validate selection token and return cached numbers"""
+        try:
+            if self.redis_client:
+                cached_data = self.redis_client.get(f"number_selection:{token}")
+                if cached_data:
+                    return json.loads(cached_data)
+            else:
+                logger.warning("Redis not available for token validation")
+            return None
+        except Exception as e:
+            logger.error(f"Token validation failed: {e}")
+            return None
