@@ -64,8 +64,12 @@ def initialize_extensions(app):
     
     try:
         # CORS
-        CORS(app, origins=["http://localhost:3000", "http://localhost:5173"])
-        print("✅ CORS initialized")
+        if app.config['ENV'] == 'development':
+            CORS(app, origins=["http://localhost:3000"], supports_credentials=True)
+            print("✅ CORS initialized")
+        else:
+            CORS(app, supports_credentials=True)
+            print("✅ CORS initialized for production")
         
         # Database
         db.init_app(app)

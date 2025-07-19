@@ -10,7 +10,7 @@ from celery import current_task
 from celery.exceptions import Retry
 from app.extensions import celery, db
 from app.models.message import Message
-from app.models.profile import Profile
+
 from app.models.client import Client
 from app.services.ai_service import AIService
 from app.services.signalwire_service import SignalWireService
@@ -54,10 +54,10 @@ def process_incoming_sms(self, webhook_data: Dict[str, Any]):
             raise Exception("Failed to store message in database")
         
         # Find profile
-        profile = Profile.query.filter_by(phone_number=to_number, is_active=True).first()
+        user = user.query.filter_by(phone_number=to_number, is_active=True).first()
         
-        if not profile:
-            logging.warning(f"No active profile found for number: {to_number}")
+        if not user:
+            logging.warning(f"No active user found for number: {to_number}")
             return {
                 'success': False,
                 'error': 'No active profile found',
@@ -65,18 +65,18 @@ def process_incoming_sms(self, webhook_data: Dict[str, Any]):
             }
         
         # Check if AI is enabled
-        if not profile.ai_enabled:
-            logging.info(f"AI disabled for profile {profile.id}")
+        if not user.ai_enabled:
+            logging.info(f"AI disabled for {user.id}")
             return {
                 'success': True,
                 'ai_response_generated': False,
-                'reason': 'AI disabled for profile'
+                'reason': 'AI disabled for user'
             }
         
         # Queue AI response generation
         generate_ai_response.delay(
             message_sid=message_sid,
-            profile_id=profile.id,
+            profile_id=user.id,
             message_body=message_body,
             from_number=from_number,
             to_number=to_number
@@ -85,7 +85,7 @@ def process_incoming_sms(self, webhook_data: Dict[str, Any]):
         return {
             'success': True,
             'message_sid': message_sid,
-            'profile_id': profile.id,
+            'user_id': user.id,
             'ai_task_queued': True
         }
         
@@ -111,7 +111,7 @@ def generate_ai_response(self, message_sid: str, user_id: int, message_body: str
     
     Args:
         message_sid: Original message SID
-        profile_id: Profile ID for context
+        user_id: User ID for context
         message_body: Incoming message text
         from_number: Sender's phone number
         to_number: Recipient's phone number (profile number)
@@ -123,7 +123,7 @@ def generate_ai_response(self, message_sid: str, user_id: int, message_body: str
         logging.info(f"[TASK] Generating AI response for {message_sid}")
         
         # Get profile
-        user = 
+        user = user.query.filter_by(id=user_id, is_active=True).first()
         if not user:
             raise Exception(f"${user.username} was not found")
         
@@ -172,7 +172,7 @@ def generate_ai_response(self, message_sid: str, user_id: int, message_body: str
             from_number=to_number,
             message_body=fallback_response,
             original_message_sid=message_sid,
-            profile_id=profile_id,
+            user_id=user_id,
             is_fallback=True
         )
         
@@ -190,7 +190,7 @@ def send_sms_message(self, to_number: str, from_number: str, message_body: str,
         from_number: Sender phone number
         message_body: Message content
         original_message_sid: Original incoming message SID
-        profile_id: Profile ID for tracking
+        user_id: User ID for tracking
         is_fallback: Whether this is a fallback response
     
     Returns:
@@ -243,7 +243,7 @@ def send_sms_message(self, to_number: str, from_number: str, message_body: str,
                 body=message_body,
                 direction='outbound',
                 status='failed',
-                profile_id=profile_id,
+                user_id=user_id,
                 error_message=str(e)
             )
         
@@ -381,7 +381,7 @@ def batch_send_messages(messages: list):
                 to_number=msg['to'],
                 from_number=msg['from'],
                 message_body=msg['body'],
-                profile_id=msg.get('profile_id')
+                user_id=msg.get('user_id')
             )
             results.append(result.id)
         
@@ -400,7 +400,7 @@ def batch_send_messages(messages: list):
 # Helper function for database operations
 def store_message_in_db(message_sid: str, from_number: str, to_number: str, 
                        body: str, direction: str, status: str = 'received',
-                       profile_id: int = None, client_id: int = None,
+                       user_id: int = None, client_id: int = None,
                        related_message_sid: str = None, is_ai_generated: bool = False,
                        error_message: str = None) -> Optional[Message]:
     """
@@ -431,7 +431,7 @@ def store_message_in_db(message_sid: str, from_number: str, to_number: str,
         # Create message record
         message = Message(
             message_sid=message_sid,
-            profile_id=profile_id,
+            user_id=user_id,
             client_id=client_id,
             sender_number=from_number,
             recipient_number=to_number,
