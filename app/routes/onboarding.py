@@ -1,4 +1,3 @@
-# app/routes/onboarding.py
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime, timedelta
@@ -26,45 +25,8 @@ def get_onboarding_status():
         if not user:
             return jsonify({'error': 'User not found'}), 404
         
-        # Check subscription status
-        subscription = Subscription.query.filter_by(
-            user_id=user.id,
-            status='active'
-        ).first() or Subscription.query.filter_by(
-            user_id=user.id,
-            status='trialing'
-        ).first()
-        
-        # Check payment method
-        payment_method = PaymentMethod.query.filter_by(
-            user_id=user.id,
-            status='active',
-            is_default=True
-        ).first()
-        
-        onboarding_status = {
-            'user_id': user.id,
-            'username': user.username,
-            'email': user.email,
-            'is_trial_user': subscription and subscription.status == 'trialing',
-            'has_active_subscription': subscription and subscription.status == 'active',
-            'has_valid_payment_method': payment_method is not None,
-            'signalwire_setup_completed': user.signalwire_setup_completed,
-            'signalwire_phone_number': user.signalwire_phone_number,
-            'trial_phone_expires_at': user.trial_phone_expires_at.isoformat() if user.trial_phone_expires_at else None,
-            'requires_onboarding': False
-        }
-        
-        # Determine if onboarding is required
-        if not subscription:
-            onboarding_status['requires_onboarding'] = True
-            onboarding_status['onboarding_step'] = 'subscription_required'
-        elif not payment_method:
-            onboarding_status['requires_onboarding'] = True
-            onboarding_status['onboarding_step'] = 'payment_method_required'
-        elif not user.signalwire_setup_completed:
-            onboarding_status['requires_onboarding'] = True
-            onboarding_status['onboarding_step'] = 'phone_setup_required'
+        # Get comprehensive onboarding status
+        onboarding_status = user.get_onboarding_status()
         
         return jsonify({
             'success': True,
@@ -108,8 +70,8 @@ def search_phone_numbers():
         
         # Validate request data
         schema = {
-            'area_code': {'type': 'string', 'required': False},
-            'locality': {'type': 'string', 'required': False},
+            'area_code': {'type': 'string', 'required': False, 'pattern': r'^\d{3}$'},  # 3-digit area code
+            'locality': {'type': 'string', 'required': False, 'max_length': 50},
             'limit': {'type': 'integer', 'required': False, 'min': 1, 'max': 10}
         }
         
@@ -117,34 +79,42 @@ def search_phone_numbers():
         validation_error = validate_json_data(data, schema)
         if validation_error:
             return jsonify({'error': validation_error}), 400
+    
+    except Exception as e:
+        logger.error(f"Phone number search validation failed: {e}")
+        return jsonify({'error': 'Invalid request data'}), 400
         
-        # Initialize SignalWire service
-        signalwire_service = SignalWireService()
+        
+        #Initialize SignalWire service
+    try:
+            signalwire_service = SignalWireService()
+    except Exception as e:
+            logger.error(f"SignalWire service initialization failed: {e}")
+            return jsonify({
+                'error': 'SignalWire service not available. Please try again later.'
+            }), 503
         
         # Search for numbers (Ontario only)
-        result = signalwire_service.search_available_numbers(
-            country='CA',
-            area_code=data.get('area_code'),
-            locality=data.get('locality', 'Toronto'),  # Default to Toronto
-            limit=data.get('limit', 5)
+    result = signalwire_service.search_available_numbers(
+        country='CA',
+        area_code=data.get('area_code'),
+        locality=data.get('locality', 'Toronto'),  # Default to Toronto
+        limit=data.get('limit', 5)
         )
         
-        if not result['success']:
+    if not result['success']:
             return jsonify({
                 'error': result['error']
             }), 400
         
-        return jsonify({
+    return jsonify({
             'success': True,
             'available_numbers': result['available_numbers'],
             'selection_token': result['selection_token'],
             'expires_in': result['expires_in']
         })
         
-    except Exception as e:
-        logger.error(f"Phone number search failed: {e}")
-        return jsonify({'error': 'Failed to search phone numbers'}), 500
-
+  
 
 @onboarding_bp.route('/purchase-number', methods=['POST'])
 @jwt_required()
@@ -177,17 +147,30 @@ def purchase_phone_number():
         
         # Validate request data
         schema = {
-            'selectedPhoneNumber': {'type': 'string', 'required': True},
-            'selectionToken': {'type': 'string', 'required': True}
+            'selectedPhoneNumber': {
+                'type': 'string', 
+                'required': True,
+                'pattern': ''r'^\+1\d{10}'  # E.164 format validation
+            },
+            'selectionToken': {'type': 'string', 'required': True, 'min_length': 10}
         }
         
         data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Request body required'}), 400
+            
         validation_error = validate_json_data(data, schema)
         if validation_error:
             return jsonify({'error': validation_error}), 400
         
         # Initialize SignalWire service
-        signalwire_service = SignalWireService()
+        try:
+            signalwire_service = SignalWireService()
+        except Exception as e:
+            logger.error(f"SignalWire service initialization failed: {e}")
+            return jsonify({
+                'error': 'SignalWire service not available. Please try again later.'
+            }), 503
         
         # Create subproject and purchase number
         result = signalwire_service.create_subproject_and_purchase_number(
@@ -201,39 +184,55 @@ def purchase_phone_number():
             return jsonify({'error': result['error']}), 400
         
         # Update user with SignalWire information
-        user.signalwire_subproject_id = result['subproject']['sid']
-        user.signalwire_subproject_token = result['subproject']['auth_token']
-        user.signalwire_phone_number = result['phone_number']['number']
-        user.signalwire_phone_number_sid = result['phone_number']['sid']
-        user.signalwire_setup_completed = True
-        user.trial_phone_expires_at = datetime.fromisoformat(result['trial_expires_at'].replace('Z', '+00:00'))
+        try:
+            user.signalwire_subproject_id = result['subproject']['sid']
+            user.signalwire_subproject_token = result['subproject']['auth_token']
+            user.signalwire_phone_number = result['phone_number']['number']
+            user.signalwire_phone_number_sid = result['phone_number']['sid']
+            user.signalwire_setup_completed = True
+            user.trial_phone_expires_at = datetime.fromisoformat(
+                result['trial_expires_at'].replace('Z', '+00:00')
+            )
+            
+            # Create or update trial subscription
+            subscription = Subscription.query.filter_by(user_id=user.id).first()
+            if not subscription:
+                # Get the basic plan for trial
+                basic_plan = SubscriptionPlan.query.filter_by(name='Basic').first()
+                if basic_plan:
+                    subscription = Subscription(
+                        user_id=user.id,
+                        plan_id=basic_plan.id,
+                        status='trialing',
+                        billing_cycle='monthly',
+                        auto_renew=True,
+                        amount=basic_plan.monthly_price,
+                        current_period_start=datetime.utcnow(),
+                        current_period_end=datetime.utcnow() + timedelta(days=14),
+                        trial_end=datetime.utcnow() + timedelta(days=14)
+                    )
+                    db.session.add(subscription)
+            
+            db.session.commit()
+            
+        except Exception as e:
+            logger.error(f"Failed to update user after number purchase: {e}")
+            db.session.rollback()
+            return jsonify({
+                'error': 'Phone number purchased but failed to update account. Please contact support.'
+            }), 500
         
-        # Create or update trial subscription
-        subscription = Subscription.query.filter_by(user_id=user.id).first()
-        if not subscription:
-            # Get the basic plan for trial
-            basic_plan = SubscriptionPlan.query.filter_by(name='Basic').first()
-            if basic_plan:
-                subscription = Subscription(
-                    user_id=user.id,
-                    plan_id=basic_plan.id,
-                    status='trialing',
-                    billing_cycle='monthly',
-                    auto_renew=True,
-                    amount=basic_plan.monthly_price,
-                    current_period_start=datetime.utcnow(),
-                    current_period_end=datetime.utcnow() + timedelta(days=14),
-                    trial_end=datetime.utcnow() + timedelta(days=14)
-                )
-                db.session.add(subscription)
-        
-        db.session.commit()
-        
-        # Test webhook configuration
-        webhook_test = signalwire_service.test_webhook_configuration(
-            result['subproject']['sid'],
-            result['phone_number']['number']
-        )
+        # Test webhook configuration (optional - don't fail if this fails)
+        webhook_test_passed = True
+        try:
+            webhook_test = signalwire_service.test_webhook_configuration(
+                result['subproject']['sid'],
+                result['phone_number']['number']
+            )
+            webhook_test_passed = webhook_test['success']
+        except Exception as e:
+            logger.warning(f"Webhook test failed: {e}")
+            webhook_test_passed = False
         
         return jsonify({
             'success': True,
@@ -241,8 +240,8 @@ def purchase_phone_number():
             'subproject': result['subproject'],
             'phone_number': result['phone_number'],
             'trial_expires_at': result['trial_expires_at'],
-            'webhook_configured': result['webhook_configured'],
-            'webhook_test_passed': webhook_test['success']
+            'webhook_configured': result.get('webhook_configured', True),
+            'webhook_test_passed': webhook_test_passed
         })
         
     except Exception as e:
@@ -275,7 +274,8 @@ def verify_onboarding_requirements():
         requirements_met = {
             'has_payment_method': payment_method is not None,
             'has_selected_plan': subscription is not None,
-            'can_proceed_to_phone_setup': payment_method is not None and subscription is not None
+            'can_proceed_to_phone_setup': payment_method is not None and subscription is not None,
+            'signalwire_already_setup': user.signalwire_setup_completed
         }
         
         if not requirements_met['can_proceed_to_phone_setup']:
@@ -320,8 +320,13 @@ def complete_onboarding():
             }), 400
         
         # Get usage statistics
-        signalwire_service = SignalWireService()
-        usage_stats = signalwire_service.get_subproject_usage(user.signalwire_subproject_id)
+        usage_stats = {}
+        try:
+            signalwire_service = SignalWireService()
+            usage_result = signalwire_service.get_subproject_usage(user.signalwire_subproject_id)
+            usage_stats = usage_result.get('usage', {}) if usage_result['success'] else {}
+        except Exception as e:
+            logger.warning(f"Failed to get usage statistics: {e}")
         
         return jsonify({
             'success': True,
@@ -331,11 +336,51 @@ def complete_onboarding():
                 'username': user.username,
                 'email': user.email,
                 'phone_number': user.signalwire_phone_number,
-                'trial_expires_at': user.trial_phone_expires_at.isoformat() if user.trial_phone_expires_at else None
+                'trial_expires_at': user.trial_phone_expires_at.isoformat() if user.trial_phone_expires_at else None,
+                'trial_days_remaining': user.trial_days_remaining
             },
-            'usage_stats': usage_stats.get('usage', {}) if usage_stats['success'] else {}
+            'usage_stats': usage_stats
         })
         
     except Exception as e:
         logger.error(f"Onboarding completion failed: {e}")
         return jsonify({'error': 'Failed to complete onboarding'}), 500
+
+
+# Additional helper endpoint for development/testing
+@onboarding_bp.route('/test-signalwire', methods=['GET'])
+@jwt_required()
+def test_signalwire_connection():
+    """Test SignalWire service connection (development only)"""
+    try:
+        if current_app.config.get('ENV') != 'development':
+            return jsonify({'error': 'Only available in development'}), 403
+        
+        current_user_id = get_jwt_identity()
+        user = User.query.get(current_user_id)
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        # Initialize SignalWire service
+        signalwire_service = SignalWireService()
+        
+        # Test number search
+        result = signalwire_service.search_available_numbers('CA', area_code='289', limit=2)
+        
+        return jsonify({
+            'success': True,
+            'signalwire_test': result,
+            'user_status': {
+                'has_signalwire_setup': user.signalwire_setup_completed,
+                'phone_number': user.signalwire_phone_number,
+                'trial_expires': user.trial_phone_expires_at.isoformat() if user.trial_phone_expires_at else None
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"SignalWire test failed: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
