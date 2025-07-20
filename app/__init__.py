@@ -11,7 +11,7 @@ def create_app(config_name=None):
     
     # Set default config
     if config_name is None:
-        config_name = os.getenv('FLASK_ENV', 'development')
+        config_name = os.getenv('FLASK_ENV', 'production')
     
     print(f"🚀 Creating Flask app with config: {config_name}")
     
@@ -64,13 +64,9 @@ def initialize_extensions(app):
     
     try:
         # CORS
-        if app.config['ENV'] == 'development':
-            CORS(app, origins=["http://localhost:3000"], supports_credentials=True)
-            print("✅ CORS initialized")
-        else:
-            CORS(app, supports_credentials=True)
-            print("✅ CORS initialized for production")
-        
+        CORS(app, origins=["https://assitext.ca"], supports_credentials=True)
+        print("✅ CORS initialized")
+                
         # Database
         db.init_app(app)
         print("✅ Database initialized")
