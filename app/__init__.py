@@ -63,9 +63,7 @@ def initialize_extensions(app):
     print("🔧 Initializing extensions...")
     
     try:
-        # CORS
-        CORS(app, origins=["https://assitext.ca"], supports_credentials=True)
-        print("✅ CORS initialized")
+        
                 
         # Database
         db.init_app(app)
