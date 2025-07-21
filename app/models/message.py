@@ -8,7 +8,7 @@ class Message(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    
+    client_id = db.Column(db.Integer, db.ForeignKey('clients.id'), nullable=True) 
     # Message details
     from_number = db.Column(db.String(20), nullable=False, index=True)
     to_number = db.Column(db.String(20), nullable=False, index=True)
@@ -43,7 +43,8 @@ class Message(db.Model):
     
     # Relationships
     user = db.relationship('User', back_populates='messages')
-    
+    client = db.relationship('Client', back_populates='messages')
+
     def __init__(self, **kwargs):
         super(Message, self).__init__(**kwargs)
         
