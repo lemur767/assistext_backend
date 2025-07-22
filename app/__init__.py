@@ -144,7 +144,9 @@ def register_blueprints(app):
         # Feature blueprints (optional)
         ('app.api.messages', 'messages_bp', '/api/messages', False),
         ('app.api.clients', 'clients_bp', '/api/clients', False),
-    ]
+        ('app.api.signup', 'signup_bp', '/api/signup', False),\
+        ('app.api.subscriptions', 'subscriptions_bp', '/api/subscriptions', False),
+    ]   
     
     for module_name, blueprint_name, url_prefix, is_required in blueprint_configs:
         if blueprint_name in registered_blueprints:

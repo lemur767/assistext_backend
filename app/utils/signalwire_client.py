@@ -136,72 +136,61 @@ class SignalWireClient:
                 current_app.logger.error(f"Signature validation failed: {e}")
             return False
     
-    @with_retry(max_retries=3, base_delay=2.0)
-    def search_available_numbers(self, criteria: Dict[str, Any]) -> Dict[str, Any]:
-        """Search for available phone numbers"""
+    def search_available_numbers(self, search_criteria: Dict[str, Any]) -> Dict[str, Any]:
+        """Search for available phone numbers using SignalWire API"""
         try:
-            # Extract search criteria
-            country = criteria.get('country', 'US')
-            area_code = criteria.get('area_code')
-            city = criteria.get('city')
-            region = criteria.get('region')
-            contains = criteria.get('contains')
-            limit = criteria.get('limit', 20)
+            country = search_criteria.get('country', 'US')
             
-            # Search parameters
-            search_params = {}
-            if area_code:
-                search_params['area_code'] = area_code
-            if city:
-                search_params['in_locality'] = city
-            if region:
-                search_params['in_region'] = region
-            if contains:
-                search_params['contains'] = contains
-            
-            # Search for local numbers
+            # Use the SignalWire SDK to search for numbers
             if country.upper() == 'US':
-                available_numbers = self.client.available_phone_numbers('US').local.list(
-                    limit=limit, **search_params
+                numbers = self.client.available_phone_numbers('US').local.list(
+                    area_code=search_criteria.get('area_code'),
+                    contains=search_criteria.get('contains'),
+                    in_locality=search_criteria.get('city'),
+                    in_region=search_criteria.get('region'),
+                    sms_enabled=True,
+                    voice_enabled=True,
+                    limit=search_criteria.get('limit', 20)
                 )
             elif country.upper() == 'CA':
-                available_numbers = self.client.available_phone_numbers('CA').local.list(
-                    limit=limit, **search_params
+                numbers = self.client.available_phone_numbers('CA').local.list(
+                    area_code=search_criteria.get('area_code'),
+                    contains=search_criteria.get('contains'),
+                    in_locality=search_criteria.get('city'),
+                    in_region=search_criteria.get('region'),
+                    sms_enabled=True,
+                    voice_enabled=True,
+                    limit=search_criteria.get('limit', 20)
                 )
-            else:
-                return {'success': False, 'error': 'Unsupported country code'}
             
-            # Format results
-            numbers = []
-            for num in available_numbers:
-                numbers.append({
-                    'phone_number': num.phone_number,
-                    'friendly_name': num.friendly_name,
-                    'locality': num.locality,
-                    'region': num.region,
+            # Format the results
+            formatted_numbers = []
+            for number in numbers:
+                formatted_numbers.append({
+                    'phone_number': number.phone_number,
+                    'formatted_number': number.friendly_name or number.phone_number,
+                    'locality': number.locality,
+                    'region': number.region,
                     'country': country.upper(),
                     'capabilities': {
-                        'voice': getattr(num.capabilities, 'voice', True),
-                        'sms': getattr(num.capabilities, 'SMS', True),
-                        'mms': getattr(num.capabilities, 'MMS', True)
+                        'sms': getattr(number.capabilities, 'SMS', True),
+                        'mms': getattr(number.capabilities, 'MMS', True),
+                        'voice': getattr(number.capabilities, 'voice', True)
                     },
-                    'monthly_cost': '$1.00'  # Standard local number cost
+                    'monthly_cost': '$1.00'
                 })
-            
-            if current_app:
-                current_app.logger.info(f"Found {len(numbers)} available numbers")
             
             return {
                 'success': True,
-                'numbers': numbers,
-                'count': len(numbers),
-                'search_criteria': criteria
+                'numbers': formatted_numbers,
+                'count': len(formatted_numbers),
+                'search_criteria': search_criteria
             }
             
         except Exception as e:
-            return SignalWireErrorHandler.handle_error(e, 'search_available_numbers')
-    
-    @with_retry(max_retries=2, base_delay=3.0)
+            logging.error(f"Number search failed: {str(e)}")
+            return {'success': False, 'error': str(e)}
+
     def purchase_phone_number(self, phone_number: str, webhook_config: Dict[str, str]) -> Dict[str, Any]:
         """Purchase a phone number with webhook configuration"""
         try:
@@ -209,16 +198,15 @@ class SignalWireClient:
             purchased_number = self.client.incoming_phone_numbers.create(
                 phone_number=phone_number,
                 friendly_name=webhook_config.get('friendly_name', 'AssisText Number'),
-                sms_url=f"{self.config.webhook_base_url}/api/webhooks/sms",
+                sms_url=f"https://backend.assitext.ca/api/webhooks/sms",
                 sms_method='POST',
-                voice_url=f"{self.config.webhook_base_url}/api/webhooks/voice",
+                voice_url=f"https://backend.assitext.ca/api/webhooks/voice",
                 voice_method='POST',
-                status_callback=f"{self.config.webhook_base_url}/api/webhooks/status",
+                status_callback=f"https://backend.assitext.ca/api/webhooks/status",
                 status_callback_method='POST'
             )
             
-            if current_app:
-                current_app.logger.info(f"Successfully purchased: {purchased_number.phone_number}")
+            logging.info(f"Successfully purchased: {purchased_number.phone_number}")
             
             return {
                 'success': True,
@@ -232,21 +220,20 @@ class SignalWireClient:
             }
             
         except Exception as e:
-            return SignalWireErrorHandler.handle_error(e, 'purchase_phone_number')
-    
-    @with_retry(max_retries=3, base_delay=1.0)
-    def send_sms(self, from_number: str, to_number: str, body: str) -> Dict[str, Any]:
-        """Send SMS message"""
+            logging.error(f"Phone number purchase failed: {str(e)}")
+            return {'success': False, 'error': str(e)}
+
+    def send_sms_message(self, from_number: str, to_number: str, message_body: str) -> Dict[str, Any]:
+        """Send an SMS message"""
         try:
             message = self.client.messages.create(
                 from_=from_number,
                 to=to_number,
-                body=body,
-                status_callback=f"{self.config.webhook_base_url}/api/webhooks/status"
+                body=message_body,
+                status_callback=f"https://backend.assitext.ca/api/webhooks/status"
             )
             
-            if current_app:
-                current_app.logger.info(f"SMS sent successfully: {message.sid}")
+            logging.info(f"SMS sent successfully: {message.sid}")
             
             return {
                 'success': True,
@@ -255,15 +242,15 @@ class SignalWireClient:
                 'from_number': message.from_,
                 'to_number': message.to,
                 'body': message.body,
-                'price': message.price,
                 'direction': message.direction
             }
             
         except Exception as e:
-            return SignalWireErrorHandler.handle_error(e, 'send_sms')
-    
+            logging.error(f"SMS send failed: {str(e)}")
+            return {'success': False, 'error': str(e)}
+
     def get_message_status(self, message_sid: str) -> Dict[str, Any]:
-        """Get message delivery status"""
+        """Get the status of a sent message"""
         try:
             message = self.client.messages(message_sid).fetch()
             
@@ -278,7 +265,8 @@ class SignalWireClient:
             }
             
         except Exception as e:
-            return SignalWireErrorHandler.handle_error(e, 'get_message_status')
+            logging.error(f"Message status fetch failed: {str(e)}")
+            return {'success': False, 'error': str(e)}
 
 # Global client instance
 _signalwire_client = None
