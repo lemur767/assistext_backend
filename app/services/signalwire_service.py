@@ -162,7 +162,7 @@ class SignalWireService:
             }
             
             if subproject_sid:
-                purchase_params['account_sid'] = subproject_sid
+                purchase_params['subproject_sid'] = subproject_sid
             
             purchased_number = self.client.incoming_phone_numbers.create(**purchase_params)
             
@@ -173,7 +173,6 @@ class SignalWireService:
                 'phone_number_sid': purchased_number.sid,
                 'phone_number': purchased_number.phone_number,
                 'friendly_name': purchased_number.friendly_name,
-                'account_sid': getattr(purchased_number, 'account_sid', None),
                 'webhook_configured': True,
                 'webhooks': {
                     'sms_url': getattr(purchased_number, 'sms_url', None),
@@ -328,7 +327,8 @@ class SignalWireService:
                 'success': True,
                 'tenant_setup': {
                     'user_id': user_id,
-                    'subproject': subproject_result,
+                    'subproject_sid': subproject_sid,
+                    'friendly_name': friendly_name,
                     'phone_number': purchase_result,
                     'setup_completed_at': datetime.utcnow().isoformat()
                 }
@@ -489,7 +489,7 @@ def get_phone_number_status(self, phone_number_sid):
                 'voice_url': phone_number.voice_url,
                 'status_callback': phone_number.status_callback
             },
-            'account_sid': phone_number.account_sid,
+            'subproject_sid': phone_number.subproject_sid,
             'capabilities': {
                 'sms': getattr(phone_number.capabilities, 'sms', False),
                 'voice': getattr(phone_number.capabilities, 'voice', False)

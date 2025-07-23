@@ -1,0 +1,44 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+{% if urgency_level == 'urgent' %}
+    <h2 style="color: #dc2626;">🚨 {{ days_remaining }} Day{{ 's' if days_remaining > 1 else '' }} Left!</h2>
+{% elif urgency_level == 'medium' %}
+    <h2 style="color: #f59e0b;">⚠️ {{ days_remaining }} Days Remaining</h2>
+{% else %}
+    <h2>⏰ Trial Update - {{ days_remaining }} Days Left</h2>
+{% endif %}
+
+<p>Hi {{ first_name }},</p>
+
+<p>Your AssisText trial will expire in <strong>{{ days_remaining }} day{{ 's' if days_remaining > 1 else '' }}</strong> on {{ trial_end_date }}.</p>
+
+{% if usage_stats %}
+<p><strong>Your trial usage:</strong></p>
+<ul>
+    <li>Messages processed: {{ usage_stats.messages_processed or 0 }}</li>
+    <li>Clients managed: {{ usage_stats.clients_managed or 0 }}</li>
+    <li>Phone number: {{ phone_number or 'Not assigned' }}</li>
+</ul>
+{% endif %}
+
+<p>To continue using AssisText without interruption:</p>
+
+{% if urgency_level == 'urgent' %}
+<a href="{{ upgrade_url }}" class="button urgent">Upgrade Now to Keep Service Active</a>
+{% else %}
+<a href="{{ upgrade_url }}" class="button">Choose Your Plan</a>
+{% endif %}
+
+<p>Why upgrade?</p>
+<ul>
+    <li>✅ Keep your dedicated phone number</li>
+    <li>✅ Unlimited AI-powered responses</li>
+    <li>✅ Advanced customer management</li>
+    <li>✅ Priority support</li>
+</ul>
+
+<p>Questions? Contact us at <a href="mailto:{{ support_email }}">{{ support_email }}</a></p>
+
+<p>Best regards,<br>The AssisText Team</p>
+{% endblock %}
