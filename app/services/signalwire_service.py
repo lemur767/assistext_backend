@@ -1,14 +1,16 @@
-# Create a completely simplified version that avoids the problematic account access
-
+"""
+UNIFIED SignalWire Service Layer
+Consolidates ALL SignalWire functionality into ONE service
+"""
 
 import os
 import logging
 import hmac
 import hashlib
 import base64
-from typing import Dict, List, Tuple, Optional, Any
-from datetime import datetime, timedelta
-from flask import current_app, request
+from typing import Dict, List, Optional, Any
+from datetime import datetime
+from flask import request
 from signalwire.rest import Client as SignalWireClient
 
 logger = logging.getLogger(__name__)
@@ -18,14 +20,14 @@ class SignalWireServiceError(Exception):
     pass
 
 class SignalWireService:
-    """UNIFIED SignalWire Service - The ONLY SignalWire integration class you need"""
+    """UNIFIED SignalWire Service"""
     
     def __init__(self):
         self._client = None
         self._config = self._load_config()
         self._validate_config()
     
-    def _load_config(self) -> Dict[str, str]:
+    def _load_config(self):
         """Load SignalWire configuration from environment"""
         return {
             'project_id': os.getenv('SIGNALWIRE_PROJECT_ID') or os.getenv('SIGNALWIRE_PROJECT'),
@@ -43,8 +45,8 @@ class SignalWireService:
             raise SignalWireServiceError(f"Missing required SignalWire config: {', '.join(missing)}")
     
     @property
-    def client(self) -> SignalWireClient:
-        """Lazy-load SignalWire client with connection validation"""
+    def client(self):
+        """Lazy-load SignalWire client"""
         if self._client is None:
             try:
                 self._client = SignalWireClient(
@@ -52,18 +54,14 @@ class SignalWireService:
                     self._config['auth_token'],
                     signalwire_space_url=self._config['space_url']
                 )
-                logger.info("✅ SignalWire client initialized successfully")
+                logger.info("SignalWire client initialized successfully")
             except Exception as e:
-                logger.error(f"❌ Failed to initialize SignalWire client: {e}")
+                logger.error(f"Failed to initialize SignalWire client: {e}")
                 raise SignalWireServiceError(f"SignalWire connection failed: {e}")
         
         return self._client
 
-    # =========================================================================
-    # SUB-PROJECT (SUBACCOUNT) MANAGEMENT
-    # =========================================================================
-    
-    def create_subproject(self, user_id: int, friendly_name: str) -> Dict[str, Any]:
+    def create_subproject(self, user_id, friendly_name):
         """Create a dedicated sub-project for multi-tenant isolation"""
         try:
             subproject_name = f"User_{user_id}_{friendly_name}"
@@ -72,7 +70,7 @@ class SignalWireService:
                 friendly_name=subproject_name
             )
             
-            logger.info(f"✅ Created subproject: {subproject.sid} for user {user_id}")
+            logger.info(f"Created subproject: {subproject.sid} for user {user_id}")
             
             return {
                 'success': True,
@@ -84,24 +82,14 @@ class SignalWireService:
             }
             
         except Exception as e:
-            logger.error(f"❌ Subproject creation failed: {e}")
+            logger.error(f"Subproject creation failed: {e}")
             return {
                 'success': False,
                 'error': str(e)
             }
 
-    # =========================================================================
-    # PHONE NUMBER SEARCH & MANAGEMENT
-    # =========================================================================
-    
-    def search_available_numbers(self, 
-                                country: str = 'US',
-                                area_code: str = None,
-                                city: str = None,
-                                region: str = None,
-                                contains: str = None,
-                                limit: int = 20) -> Dict[str, Any]:
-        """Search for available phone numbers with comprehensive filtering"""
+    def search_available_numbers(self, country='US', area_code=None, city=None, region=None, contains=None, limit=20):
+        """Search for available phone numbers"""
         try:
             limit = min(limit, 50)
             
@@ -133,14 +121,14 @@ class SignalWireService:
                     'region': number.region,
                     'country': country.upper(),
                     'capabilities': {
-                        'sms': getattr(number.capabilities, 'SMS', True) if hasattr(number, 'capabilities') else True,
-                        'mms': getattr(number.capabilities, 'MMS', True) if hasattr(number, 'capabilities') else True,
-                        'voice': getattr(number.capabilities, 'voice', True) if hasattr(number, 'capabilities') else True
+                        'sms': True,
+                        'mms': True,
+                        'voice': True
                     },
                     'monthly_cost': '$1.00'
                 })
             
-            logger.info(f"✅ Found {len(formatted_numbers)} available numbers")
+            logger.info(f"Found {len(formatted_numbers)} available numbers")
             
             return {
                 'success': True,
@@ -149,7 +137,7 @@ class SignalWireService:
             }
             
         except Exception as e:
-            logger.error(f"❌ Phone number search failed: {e}")
+            logger.error(f"Phone number search failed: {e}")
             return {
                 'success': False,
                 'error': str(e),
@@ -157,14 +145,7 @@ class SignalWireService:
                 'count': 0
             }
 
-    # =========================================================================
-    # PHONE NUMBER PURCHASE & ASSIGNMENT
-    # =========================================================================
-    
-    def purchase_number(self, 
-                       phone_number: str,
-                       subproject_sid: str = None,
-                       friendly_name: str = None) -> Dict[str, Any]:
+    def purchase_number(self, phone_number, subproject_sid=None, friendly_name=None):
         """Purchase phone number and assign to subproject with webhooks"""
         try:
             webhook_base = self._config['webhook_base_url']
@@ -185,7 +166,7 @@ class SignalWireService:
             
             purchased_number = self.client.incoming_phone_numbers.create(**purchase_params)
             
-            logger.info(f"✅ Successfully purchased {phone_number}")
+            logger.info(f"Successfully purchased {phone_number}")
             
             return {
                 'success': True,
@@ -202,22 +183,14 @@ class SignalWireService:
             }
             
         except Exception as e:
-            logger.error(f"❌ Phone number purchase failed: {e}")
+            logger.error(f"Phone number purchase failed: {e}")
             return {
                 'success': False,
                 'error': str(e)
             }
 
-    # =========================================================================
-    # SMS SENDING & STATUS TRACKING
-    # =========================================================================
-    
-    def send_sms(self, 
-                from_number: str,
-                to_number: str,
-                message_body: str,
-                subproject_sid: str = None) -> Dict[str, Any]:
-        """Send SMS message with subproject context"""
+    def send_sms(self, from_number, to_number, message_body, subproject_sid=None):
+        """Send SMS message"""
         try:
             send_params = {
                 'from_': from_number,
@@ -236,7 +209,7 @@ class SignalWireService:
             else:
                 message = self.client.messages.create(**send_params)
             
-            logger.info(f"✅ SMS sent: {message.sid}")
+            logger.info(f"SMS sent: {message.sid}")
             
             return {
                 'success': True,
@@ -248,13 +221,13 @@ class SignalWireService:
             }
             
         except Exception as e:
-            logger.error(f"❌ SMS send failed: {e}")
+            logger.error(f"SMS send failed: {e}")
             return {
                 'success': False,
                 'error': str(e)
             }
     
-    def get_message_status(self, message_sid: str, subproject_sid: str = None) -> Dict[str, Any]:
+    def get_message_status(self, message_sid, subproject_sid=None):
         """Get message delivery status"""
         try:
             if subproject_sid:
@@ -276,20 +249,13 @@ class SignalWireService:
             }
             
         except Exception as e:
-            logger.error(f"❌ Message status fetch failed: {e}")
+            logger.error(f"Message status fetch failed: {e}")
             return {
                 'success': False,
                 'error': str(e)
             }
 
-    # =========================================================================
-    # WEBHOOK VALIDATION
-    # =========================================================================
-    
-    def validate_webhook_signature(self, 
-                                 url: str = None,
-                                 post_data: Dict = None,
-                                 signature: str = None) -> bool:
+    def validate_webhook_signature(self, url=None, post_data=None, signature=None):
         """Validate SignalWire webhook signature for security"""
         try:
             if not signature:
@@ -316,20 +282,13 @@ class SignalWireService:
             return hmac.compare_digest(signature, expected_signature)
             
         except Exception as e:
-            logger.error(f"❌ Webhook validation error: {e}")
+            logger.error(f"Webhook validation error: {e}")
             return False
 
-    # =========================================================================
-    # COMPLETE TENANT SETUP WORKFLOW
-    # =========================================================================
-    
-    def setup_new_tenant(self, 
-                         user_id: int,
-                         friendly_name: str,
-                         phone_search_criteria: Dict[str, str]) -> Dict[str, Any]:
+    def setup_new_tenant(self, user_id, friendly_name, phone_search_criteria):
         """Complete tenant setup: subproject + phone number + webhooks"""
         try:
-            logger.info(f"🚀 Starting tenant setup for user {user_id}")
+            logger.info(f"Starting tenant setup for user {user_id}")
             
             # Step 1: Create subproject
             subproject_result = self.create_subproject(user_id, friendly_name)
@@ -363,7 +322,7 @@ class SignalWireService:
                     'error': f"Phone number purchase failed: {purchase_result['error']}"
                 }
             
-            logger.info(f"✅ Complete tenant setup finished for user {user_id}")
+            logger.info(f"Complete tenant setup finished for user {user_id}")
             
             return {
                 'success': True,
@@ -376,55 +335,24 @@ class SignalWireService:
             }
             
         except Exception as e:
-            logger.error(f"❌ Tenant setup failed for user {user_id}: {e}")
+            logger.error(f"Tenant setup failed for user {user_id}: {e}")
             return {
                 'success': False,
                 'error': str(e)
             }
 
-    # =========================================================================
-    # SIMPLIFIED HEALTH CHECK - NO PROBLEMATIC ACCOUNT ACCESS
-    # =========================================================================
-    
-    def health_check(self) -> Dict[str, Any]:
-        """SIMPLIFIED health check that avoids problematic account access"""
+    def health_check(self):
+        """Simplified health check"""
         try:
-            # Test 1: Basic client initialization (already done in property)
-            client_available = self.client is not None
-            
-            # Test 2: Simple API call that should work with any account type
-            # Just try to list 1 phone number - this is much more reliable
-            try:
-                phone_numbers = self.client.incoming_phone_numbers.list(limit=1)
-                api_accessible = True
-                phone_numbers_count = len(phone_numbers)
-            except Exception as api_error:
-                logger.warning(f"API test failed: {api_error}")
-                api_accessible = False
-                phone_numbers_count = 0
-            
-            # Test 3: Try available numbers search as another connectivity test
-            try:
-                available_test = self.client.available_phone_numbers('US').local.list(limit=1)
-                search_accessible = True
-            except Exception as search_error:
-                logger.warning(f"Search test failed: {search_error}")
-                search_accessible = False
-            
-            # Determine overall health
-            is_healthy = client_available and api_accessible
+            # Test basic connectivity by listing phone numbers
+            phone_numbers = self.client.incoming_phone_numbers.list(limit=1)
             
             return {
-                'success': is_healthy,
-                'service_status': 'healthy' if is_healthy else 'degraded',
-                'connection_tests': {
-                    'client_initialized': client_available,
-                    'api_accessible': api_accessible,
-                    'search_accessible': search_accessible
-                },
-                'phone_numbers_count': phone_numbers_count,
+                'success': True,
+                'service_status': 'healthy',
+                'phone_numbers_count': len(phone_numbers),
                 'configuration': {
-                    'project_id': self._config['project_id'][:8] + '...',  # Partial for security
+                    'project_id': self._config['project_id'][:8] + '...',
                     'space_url': self._config['space_url'],
                     'webhook_base_url': self._config['webhook_base_url']
                 },
@@ -432,16 +360,11 @@ class SignalWireService:
             }
             
         except Exception as e:
-            logger.error(f"❌ Health check failed: {e}")
+            logger.error(f"Health check failed: {e}")
             return {
                 'success': False,
                 'service_status': 'unhealthy',
                 'error': str(e),
-                'configuration': {
-                    'project_id': self._config.get('project_id', 'NOT_SET')[:8] + '...',
-                    'space_url': self._config.get('space_url', 'NOT_SET'),
-                    'webhook_base_url': self._config.get('webhook_base_url', 'NOT_SET')
-                },
                 'timestamp': datetime.utcnow().isoformat()
             }
     def suspend_phone_number(self, phone_number_sid, reason="trial_expired"):
@@ -594,13 +517,10 @@ def get_phone_status(phone_number_sid):
     """Backward compatibility function"""
     return get_signalwire_service().get_phone_number_status(phone_number_sid)
 
-# =========================================================================
-# SINGLETON INSTANCE & FACTORY
-# =========================================================================
-
+# Singleton instance
 _signalwire_service = None
 
-def get_signalwire_service() -> SignalWireService:
+def get_signalwire_service():
     """Get singleton SignalWire service instance"""
     global _signalwire_service
     
@@ -613,10 +533,10 @@ def get_signalwire_service() -> SignalWireService:
 def search_phone_numbers(**kwargs):
     return get_signalwire_service().search_available_numbers(**kwargs)
 
-def purchase_phone_number(phone_number: str, subproject_sid: str = None, **kwargs):
+def purchase_phone_number(phone_number, subproject_sid=None, **kwargs):
     return get_signalwire_service().purchase_number(phone_number, subproject_sid, **kwargs)
 
-def send_sms(from_number: str, to_number: str, message_body: str, **kwargs):
+def send_sms(from_number, to_number, message_body, **kwargs):
     return get_signalwire_service().send_sms(from_number, to_number, message_body, **kwargs)
 
 def validate_webhook_signature(**kwargs):
