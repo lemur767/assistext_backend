@@ -1,0 +1,29 @@
+{% extends "emails/base.html" %}
+
+{% block content %}
+<h2>Welcome to AssisText, {{ first_name }}! 🎉</h2>
+
+<p>Thank you for joining AssisText! Your account has been successfully created.</p>
+
+<p><strong>Your login details:</strong></p>
+<ul>
+    <li>Username: {{ username }}</li>
+    <li>Email: {{ email }}</li>
+</ul>
+
+<p>To get started with your 14-day free trial:</p>
+<ol>
+    <li>Add a payment method (no charges during trial)</li>
+    <li>You already have a phone number!: {{ phone_number }}</li>
+    <li>Configure your AI responses</li>
+    <li>Start managing your SMS conversations!</li>
+</ol>
+<p> You can always change your plan later. Please note phone number given with trial is only keepable if you subscribe to a plan BEFORE trial ends.  Otherwise you will lose this number and have to reselect a new one!
+    </p>
+</p>
+<a href="{{ dashboard_url }}" class="button">Go to Dashboard</a>
+
+<p>Questions? We're here to help at <a href="mailto:{{ support_email }}">{{ support_email }}</a></p>
+
+<p>Best regards,<br>The AssisText Team</p>
+{% endblock %}
