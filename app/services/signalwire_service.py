@@ -444,7 +444,155 @@ class SignalWireService:
                 },
                 'timestamp': datetime.utcnow().isoformat()
             }
+    def suspend_phone_number(self, phone_number_sid, reason="trial_expired"):
+        """
+        Suspend a phone number by removing webhook URLs
+        This makes the number inactive for receiving/sending SMS
+        """
+        try:
+            # Update the phone number to remove webhook URLs
+            updated_number = self.client.incoming_phone_numbers(phone_number_sid).update(
+                sms_url='',  # Remove SMS webhook
+                voice_url='',  # Remove voice webhook
+                status_callback='',  # Remove status callback
+                friendly_name=f"SUSPENDED - {reason}"
+            )
+            
+            logger.info(f"✅ Suspended phone number: {updated_number.phone_number} (reason: {reason})")
+            
+            return {
+                'success': True,
+                'phone_number': updated_number.phone_number,
+                'phone_number_sid': updated_number.sid,
+                'status': 'suspended',
+                'reason': reason,
+                'suspended_at': datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to suspend phone number {phone_number_sid}: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
 
+def reactivate_phone_number(self, phone_number_sid, friendly_name=None):
+    """
+    Reactivate a suspended phone number by restoring webhook URLs
+    Called when user subscribes after trial
+    """
+    try:
+        webhook_base = self._config['webhook_base_url']
+        
+        # Restore webhook URLs
+        updated_number = self.client.incoming_phone_numbers(phone_number_sid).update(
+            sms_url=f"{webhook_base}/api/webhooks/sms",
+            sms_method='POST',
+            voice_url=f"{webhook_base}/api/webhooks/voice",
+            voice_method='POST', 
+            status_callback=f"{webhook_base}/api/webhooks/status",
+            status_callback_method='POST',
+            friendly_name=friendly_name or 'AssisText Number - Active'
+        )
+        
+        logger.info(f"✅ Reactivated phone number: {updated_number.phone_number}")
+        
+        return {
+            'success': True,
+            'phone_number': updated_number.phone_number,
+            'phone_number_sid': updated_number.sid,
+            'status': 'active',
+            'reactivated_at': datetime.utcnow().isoformat(),
+            'webhooks': {
+                'sms_url': updated_number.sms_url,
+                'voice_url': updated_number.voice_url,
+                'status_callback': updated_number.status_callback
+            }
+        }
+    except Exception as e:
+        logger.error(f"❌ Failed to reactivate phone number {phone_number_sid}: {e}")
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+def transfer_number_ownership(self, phone_number_sid, old_subproject_sid, new_subproject_sid):
+    """
+    Transfer phone number from trial subproject to paid subproject
+    Used when user upgrades from trial
+    """
+    try:
+        # Transfer the phone number to new subproject
+        updated_number = self.client.incoming_phone_numbers(phone_number_sid).update(
+            account_sid=new_subproject_sid
+        )
+        
+        logger.info(f"✅ Transferred number {updated_number.phone_number} from {old_subproject_sid} to {new_subproject_sid}")
+        
+        return {
+            'success': True,
+            'phone_number': updated_number.phone_number,
+            'phone_number_sid': updated_number.sid,
+            'old_subproject': old_subproject_sid,
+            'new_subproject': new_subproject_sid,
+            'transferred_at': datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to transfer phone number: {e}")
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+def get_phone_number_status(self, phone_number_sid):
+    """
+    Get current status of a phone number (active/suspended)
+    """
+    try:
+        phone_number = self.client.incoming_phone_numbers(phone_number_sid).fetch()
+        
+        # Determine if number is active based on webhook URLs
+        is_active = bool(phone_number.sms_url and phone_number.voice_url)
+        
+        return {
+            'success': True,
+            'phone_number': phone_number.phone_number,
+            'phone_number_sid': phone_number.sid,
+            'status': 'active' if is_active else 'suspended',
+            'friendly_name': phone_number.friendly_name,
+            'webhooks': {
+                'sms_url': phone_number.sms_url,
+                'voice_url': phone_number.voice_url,
+                'status_callback': phone_number.status_callback
+            },
+            'account_sid': phone_number.account_sid,
+            'capabilities': {
+                'sms': getattr(phone_number.capabilities, 'sms', False),
+                'voice': getattr(phone_number.capabilities, 'voice', False)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get phone number status: {e}")
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+# Also add these backward compatibility functions at the bottom of the file:
+
+def suspend_user_phone_number(phone_number_sid, reason="trial_expired"):
+    """Backward compatibility function"""
+    return get_signalwire_service().suspend_phone_number(phone_number_sid, reason)
+
+def reactivate_user_phone_number(phone_number_sid, friendly_name=None):
+    """Backward compatibility function"""
+    return get_signalwire_service().reactivate_phone_number(phone_number_sid, friendly_name)
+
+def get_phone_status(phone_number_sid):
+    """Backward compatibility function"""
+    return get_signalwire_service().get_phone_number_status(phone_number_sid)
 
 # =========================================================================
 # SINGLETON INSTANCE & FACTORY

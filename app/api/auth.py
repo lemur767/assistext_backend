@@ -11,6 +11,10 @@ import json
 
 from decimal import Decimal
 import base64
+import logging
+
+from app.services.signalwire_service import get_signalwire_service  # Make sure this import path is correct
+from flask_cors import cross_origin
 
 
 
@@ -43,410 +47,222 @@ auth_bp = Blueprint('auth', __name__)
 
 
 
+auth_bp = Blueprint('auth', __name__)
+
 @auth_bp.route('/register', methods=['POST', 'OPTIONS'])
-def register():
-    
-    if request.method == 'OPTIONS':
-        return '', 200
-  
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'No data provided'}), 400
-        
-        # Validate required fields
-        required_fields = ['username', 'email', 'password']
-        for field in required_fields:
-            if field not in data or not data[field]:
-                return jsonify({'error': f'Missing required field: {field}'}), 400
-        
-        # Validate email format
-        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        if not re.match(email_pattern, data['email']):
-            return jsonify({'error': 'Invalid email format'}), 400
-        
-        # Validate password strength
-        if len(data['password']) < 8:
-            return jsonify({'error': 'Password must be at least 8 characters long'}), 400
-        
-        # Check if username or email already exists
-        existing_user = User.query.filter(
-            (User.username == data['username']) | (User.email == data['email'])
-        ).first()
-        
-        if existing_user:
-            if existing_user.username == data['username']:
-                return jsonify({'error': 'Username already exists'}), 409
-            else:
-                return jsonify({'error': 'Email already exists'}), 409
-        
-        # Create user with integrated profile
-        user = User(
-            username=data['username'],
-            email=data['email'],
-            # Basic profile information
-            first_name=data.get('first_name', ''),
-            last_name=data.get('last_name', ''),
-            phone_number=data.get('phone_number', ''),
-           
-            
-            
-            # Default business settings
-           # auto_reply_enabled=data.get('auto_reply_enabled', True),
-           # daily_message_limit=data.get('daily_message_limit', 100),
-            
-            # Default AI settings
-           # ai_enabled=data.get('ai_enabled', True),
-           # ai_personality=data.get('ai_personality', 'Seductive mistress, flirty and fun.  Keep responses short.  Use emojis'),
-           # ai_instructions=data.get('ai_instructions','Flirty, short, polite responses.'),
-                    
-           # signalwire_project_id=data.get('signalwire_project_id'),
-           # signalwire_auth_token=data.get('signalwire_auth_token'),
-           # signalwire_space_url=data.get('signalwire_space_url'),
-            
-        )
-        
-        # Set password
-        user.set_password(data['password'])
-        
-        #Adding the signalwire phone number
-        if 'signalwire_phone_number' in data:
-            user.signalwire_phone_number=data['signalwire_phone_number']
-        
-        # Set default business hours if not provided
-        if 'business_hours' in data:
-            user.set_business_hours(data['business_hours'])
-        
-        # Set auto reply keywords if provided
-        if 'auto_reply_keywords' in data:
-            user.set_auto_reply_keywords(data['auto_reply_keywords'])
-        
-    
-        
-        db.session.add(user)
-        db.session.flush()
-        
-        # Generate tokens
-        access_token = create_access_token(
-            identity=user.id,
-            expires_delta=timedelta(hours=24)
-        )
-        refresh_token = create_refresh_token(
-            identity=user.id,
-            expires_delta=timedelta(days=30)
-        )
-        
-        
-        current_app.logger.info(f"New user registered: {user.username} ({user.email})")
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'message': 'User registered successfully',
-            'access_token': access_token,
-            'refresh_token': refresh_token,
-            'user': user.to_dict()
-        }), 201
-        
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Registration error: {str(e)}")
-        return jsonify({'error': 'Registration failed'}), 500
-
-
-@auth_bp.route('/login', methods=['POST'])
-def login():
-    """User login with complete profile data"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'No data provided'}), 400
-        
-        # Validate required fields
-        if not all([data.get('username'), data.get('password')]):
-            return jsonify({'error': 'Missing username or password'}), 400
-        
-        # Find user (allow login with username or email)
-        user = User.query.filter(
-            (User.username == data['username']) | (User.email == data['username'])
-        ).first()
-        
-        # Verify credentials
-        if not user or not user.check_password(data['password']):
-            return jsonify({'error': 'Invalid credentials'}), 401
-        
-        # Check if user is active
-        if not user.is_active:
-            return jsonify({'error': 'Account is disabled'}), 403
-        
-        # Update last login
-        user.last_login = datetime.utcnow()
-        
-        # Reset monthly count if needed
-       # user.reset_monthly_count_if_needed()
-        
-        
-        
-        
-        # Generate tokens
-        access_token = create_access_token(
-            identity=user.id,
-            expires_delta=timedelta(hours=24)
-        )
-        refresh_token = create_refresh_token(
-            identity=user.id,
-            expires_delta=timedelta(days=30)
-        )
-        
-        db.session.commit()
-        
-        current_app.logger.info(f"User logged in: {user.username}")
-        response_data = {
-            'user': user.to_dict(),
-            'success': True,
-            'access_token': access_token,
-            'refresh_token': refresh_token,
-        }
-        return safe_jsonify(response_data), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Login error: {str(e)}")
-        return jsonify({'error': 'Login failed'}), 500
-
-
-@auth_bp.route('/me', methods=['GET'])
-@jwt_required()
-def get_current_user():
+@cross_origin()
+def register_user():
     """
-    Get current user profile (complete profile data)
-    UPDATED: Returns integrated profile data instead of separate user + profile
+    Enhanced registration that automatically sets up SignalWire tenant
+    Creates: User + 14-day trial + SignalWire subproject + phone number
     """
     try:
-        user_id = get_jwt_identity()
-        user = User.query.get(user_id)
-        
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        
-        if not user.is_active:
-            return jsonify({'error': 'Account is disabled'}), 403
-        
-        # Reset monthly count if needed
-        user.reset_monthly_count_if_needed()
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'user': user.to_dict(include_sensitive=True)  # Include SignalWire config for profile settings
-        }), 200
-        
-    except Exception as e:
-        current_app.logger.error(f"Error getting current user: {str(e)}")
-        return jsonify({'error': 'Failed to get user information'}), 500
-
-
-@auth_bp.route('/refresh', methods=['POST'])
-@jwt_required(refresh=True)
-def refresh():
-    """Refresh access token"""
-    try:
-        user_id = get_jwt_identity()
-        user = User.query.get(user_id)
-        
-        if not user or not user.is_active:
-            return jsonify({'error': 'Invalid user'}), 401
-        
-        # Generate new access token
-        access_token = create_access_token(
-            identity=user_id,
-            expires_delta=timedelta(hours=24)
-        )
-        
-        return jsonify({
-            'success': True,
-            'access_token': access_token
-        }), 200
-        
-    except Exception as e:
-        current_app.logger.error(f"Token refresh error: {str(e)}")
-        return jsonify({'error': 'Token refresh failed'}), 500
-
-
-@auth_bp.route('/logout', methods=['POST'])
-@jwt_required()
-def logout():
-    """
-    Logout user (blacklist token)
-    Note: This requires implementing a token blacklist system
-    """
-    try:
-        # TODO: Implement token blacklisting
-        # For now, just return success
-        # In a production system, you'd add the token to a blacklist
-        
-        user_id = get_jwt_identity()
-        current_app.logger.info(f"User logged out: {user_id}")
-        
-        return jsonify({
-            'success': True,
-            'message': 'Logged out successfully'
-        }), 200
-        
-    except Exception as e:
-        current_app.logger.error(f"Logout error: {str(e)}")
-        return jsonify({'error': 'Logout failed'}), 500
-
-
-@auth_bp.route('/update-password', methods=['PUT'])
-@jwt_required()
-def update_password():
-    """Update user password"""
-    try:
-        user_id = get_jwt_identity()
-        user = User.query.get(user_id)
-        
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'No data provided'}), 400
-        
-        # Validate required fields
-        required_fields = ['current_password', 'new_password']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({'error': f'Missing required field: {field}'}), 400
-        
-        # Verify current password
-        if not user.check_password(data['current_password']):
-            return jsonify({'error': 'Current password is incorrect'}), 400
-        
-        # Validate new password
-        new_password = data['new_password']
-        if len(new_password) < 8:
-            return jsonify({'error': 'New password must be at least 8 characters long'}), 400
-        
-        # Update password
-        user.set_password(new_password)
-        user.updated_at = datetime.utcnow()
-        db.session.commit()
-        
-        current_app.logger.info(f"Password updated for user: {user.username}")
-        
-        return jsonify({
-            'success': True,
-            'message': 'Password updated successfully'
-        }), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Password update error: {str(e)}")
-        return jsonify({'error': 'Password update failed'}), 500
-
-
-@auth_bp.route('/verify-email', methods=['POST'])
-@jwt_required()
-def verify_email():
-    """
-    Email verification endpoint
-    TODO: Implement actual email verification with tokens
-    """
-    try:
-        user_id = get_jwt_identity()
-        user = User.query.get(user_id)
-        
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        
-        # TODO: Implement actual email verification logic
-        # For now, just mark as verified
-        user.is_verified = True
-        user.updated_at = datetime.utcnow()
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'message': 'Email verified successfully'
-        }), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Email verification error: {str(e)}")
-        return jsonify({'error': 'Email verification failed'}), 500
-
-
-@auth_bp.route('/deactivate', methods=['POST'])
-@jwt_required()
-def deactivate_account():
-    """Deactivate user account"""
-    try:
-        user_id = get_jwt_identity()
-        user = User.query.get(user_id)
-        
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
+        if request.method == 'OPTIONS':
+            return '', 204
         
         data = request.get_json() or {}
         
-        # Verify password for security
-        if 'password' not in data:
-            return jsonify({'error': 'Password required for account deactivation'}), 400
+        # Validate required fields
+        required_fields = ['username', 'email', 'password', 'first_name', 'last_name']
+        missing_fields = [field for field in required_fields if not data.get(field)]
         
-        if not user.check_password(data['password']):
-            return jsonify({'error': 'Incorrect password'}), 400
+        if missing_fields:
+            return jsonify({
+                'success': False,
+                'error': f"Missing required fields: {', '.join(missing_fields)}"
+            }), 400
         
-        # Deactivate account
-        user.is_active = False
-        user.updated_at = datetime.utcnow()
-        db.session.commit()
+        # Check if user already exists
+        existing_user = User.query.filter(
+            (User.email == data['email']) | (User.username == data['username'])
+        ).first()
         
-        current_app.logger.info(f"Account deactivated: {user.username}")
+        if existing_user:
+            return jsonify({
+                'success': False,
+                'error': 'User with this email or username already exists'
+            }), 400
         
-        return jsonify({
-            'success': True,
-            'message': 'Account deactivated successfully'
-        }), 200
+        logging.info(f"🚀 Starting registration for: {data['email']}")
         
+        # Step 1: Create user with trial settings
+        trial_end_date = datetime.utcnow() + timedelta(days=14)
+        
+        new_user = User(
+            username=data['username'],
+            email=data['email'],
+            first_name=data['first_name'],
+            last_name=data['last_name'],
+            personal_phone=data.get('personal_phone'),
+            
+            # Trial settings
+            is_trial=True,
+            trial_status='active',
+            trial_start_date=datetime.utcnow(),
+            trial_end_date=trial_end_date,
+            trial_days_remaining=14,
+            
+            # SignalWire setup flags
+            signalwire_setup_pending=True,
+            signalwire_setup_completed=False
+        )
+        
+        # Set password hash
+        new_user.set_password(data['password'])
+        
+        # Save user first to get ID
+        db.session.add(new_user)
+        db.session.flush()  # Get the user ID without committing
+        
+        user_id = new_user.id
+        logging.info(f"✅ User created with ID: {user_id}")
+        
+        # Step 2: Automatic SignalWire tenant setup
+        signalwire = get_signalwire_service()
+        
+        # Determine phone search criteria based on user preference or default
+        phone_search_criteria = {
+            'country': data.get('preferred_country', 'US'),
+            'area_code': data.get('preferred_area_code'),
+            'region': data.get('preferred_region'),
+            'limit': 5  # Search 5 numbers and pick the first available
+        }
+        
+        # Remove None values
+        phone_search_criteria = {k: v for k, v in phone_search_criteria.items() if v is not None}
+        
+        logging.info(f"🔍 Setting up SignalWire tenant for user {user_id}")
+        
+        tenant_setup_result = signalwire.setup_new_tenant(
+            user_id=user_id,
+            friendly_name=f"{data['first_name']}_{data['last_name']}",
+            phone_search_criteria=phone_search_criteria
+        )
+        
+        if tenant_setup_result['success']:
+            # Step 3: Update user with SignalWire details
+            tenant_data = tenant_setup_result['tenant_setup']
+            
+            new_user.signalwire_subproject_id = tenant_data['subproject']['subproject_sid']
+            new_user.signalwire_auth_token = tenant_data['subproject']['auth_token']
+            new_user.signalwire_phone_number = tenant_data['phone_number']['phone_number']
+            new_user.signalwire_phone_sid = tenant_data['phone_number']['phone_number_sid']
+            new_user.signalwire_setup_completed = True
+            new_user.signalwire_setup_pending = False
+            new_user.signalwire_number_active = True  # Active during trial
+            
+            # Commit all changes
+            db.session.commit()
+            
+            logging.info(f"✅ Complete registration successful for {data['email']}")
+            logging.info(f"📞 Assigned phone number: {new_user.signalwire_phone_number}")
+            
+            # Step 4: Schedule trial expiry task
+            from app.tasks.trial_tasks import schedule_trial_expiry
+            schedule_trial_expiry.delay(user_id, trial_end_date.isoformat())
+            
+            # Step 5: Send welcome email with trial info
+            from app.tasks.email_tasks import send_welcome_email
+            send_welcome_email.delay(
+                user_id=user_id,
+                email=new_user.email,
+                first_name=new_user.first_name,
+                trial_end_date=trial_end_date.isoformat(),
+                phone_number=new_user.signalwire_phone_number
+            )
+            
+            return jsonify({
+                'success': True,
+                'message': 'Registration successful! Your 14-day trial has started.',
+                'user': {
+                    'id': new_user.id,
+                    'username': new_user.username,
+                    'email': new_user.email,
+                    'first_name': new_user.first_name,
+                    'last_name': new_user.last_name,
+                    'trial_status': 'active',
+                    'trial_end_date': trial_end_date.isoformat(),
+                    'trial_days_remaining': 14
+                },
+                'signalwire': {
+                    'phone_number': new_user.signalwire_phone_number,
+                    'setup_completed': True,
+                    'number_active': True,
+                    'subproject_id': new_user.signalwire_subproject_id
+                },
+                'trial': {
+                    'active': True,
+                    'days_remaining': 14,
+                    'end_date': trial_end_date.isoformat(),
+                    'features_included': [
+                        'Automated SMS responses',
+                        'AI-powered message handling',
+                        'Basic analytics',
+                        'Webhook integration'
+                    ]
+                }
+            })
+            
+        else:
+            # SignalWire setup failed - rollback user creation
+            db.session.rollback()
+            
+            logging.error(f"❌ SignalWire setup failed for {data['email']}: {tenant_setup_result['error']}")
+            
+            return jsonify({
+                'success': False,
+                'error': 'Registration failed during phone number setup. Please try again.',
+                'details': tenant_setup_result['error']
+            }), 500
+            
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Account deactivation error: {str(e)}")
-        return jsonify({'error': 'Account deactivation failed'}), 500
-
-
-# Admin endpoints (if needed)
-
-@auth_bp.route('/admin/users', methods=['GET'])
-@jwt_required()
-def list_users():
-    """List all users (admin only)"""
-    try:
-        user_id = get_jwt_identity()
-        current_user = User.query.get(user_id)
-        
-        if not current_user or not current_user.is_admin:
-            return jsonify({'error': 'Admin access required'}), 403
-        
-        page = request.args.get('page', 1, type=int)
-        per_page = min(request.args.get('per_page', 20, type=int), 100)
-        
-        users_query = User.query.order_by(User.created_at.desc())
-        result = users_query.paginate(page=page, per_page=per_page, error_out=False)
+        logging.error(f"❌ Registration error: {str(e)}")
         
         return jsonify({
-            'success': True,
-            'users': [user.to_dict() for user in result.items],
-            'pagination': {
-                'page': page,
-                'per_page': per_page,
-                'total': result.total,
-                'pages': result.pages,
-                'has_next': result.has_next,
-                'has_prev': result.has_prev
-            }
-        }), 200
+            'success': False,
+            'error': 'Registration failed due to an internal error. Please try again.'
+        }), 500
+
+
+@auth_bp.route('/trial-status/<int:user_id>', methods=['GET'])
+def get_trial_status(user_id):
+    """Get current trial status for a user"""
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'success': False, 'error': 'User not found'}), 404
         
+        if not user.is_trial:
+            return jsonify({
+                'success': True,
+                'trial_active': False,
+                'message': 'User is not on trial'
+            })
+        
+        # Calculate remaining days
+        if user.trial_end_date:
+            remaining_time = user.trial_end_date - datetime.utcnow()
+            days_remaining = max(0, remaining_time.days)
+            
+            return jsonify({
+                'success': True,
+                'trial_active': user.trial_status == 'active',
+                'trial_status': user.trial_status,
+                'days_remaining': days_remaining,
+                'trial_end_date': user.trial_end_date.isoformat(),
+                'signalwire_number_active': user.signalwire_number_active,
+                'phone_number': user.signalwire_phone_number
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Trial end date not set'
+            })
+            
     except Exception as e:
-        current_app.logger.error(f"Error listing users: {str(e)}")
-        return jsonify({'error': 'Failed to list users'}), 500
+        logging.error(f"Error getting trial status: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to get trial status'
+        }), 500

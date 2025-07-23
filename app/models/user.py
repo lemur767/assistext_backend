@@ -16,7 +16,27 @@ class User(db.Model):
     first_name = db.Column(db.String(100))
     last_name = db.Column(db.String(100))
     phone_number = db.Column(db.String(20))
+    is_trial = db.Column(db.Boolean, default=False)
+    trial_status = db.Column(db.String(20), default='inactive')  # active, expired, converted, inactive
+    trial_start_date = db.Column(db.DateTime)
+    trial_end_date = db.Column(db.DateTime)
+    trial_days_remaining = db.Column(db.Integer, default=0)
+    trial_expired_at = db.Column(db.DateTime)
+    trial_converted_at = db.Column(db.DateTime)
     
+    # SignalWire Integration Fields
+    signalwire_setup_pending = db.Column(db.Boolean, default=False)
+    signalwire_setup_completed = db.Column(db.Boolean, default=False)
+    signalwire_subproject_id = db.Column(db.String(50))  # SignalWire subproject SID
+    signalwire_auth_token = db.Column(db.String(100))    # Subproject auth token
+    signalwire_phone_number = db.Column(db.String(20))   # Assigned phone number
+    signalwire_phone_sid = db.Column(db.String(50))      # Phone number SID
+    signalwire_number_active = db.Column(db.Boolean, default=False)  # Active/suspended status
+    
+    # Subscription Fields
+    subscription_active = db.Column(db.Boolean, default=False)
+    subscription_plan_id = db.Column(db.String(50))
+    subscription_activated_at = db.Column(db.DateTime)
     # Account status
     is_active = db.Column(db.Boolean, default=True)
     is_admin = db.Column(db.Boolean, default=False)
@@ -45,7 +65,41 @@ class User(db.Model):
     api_keys = db.relationship('APIKey', back_populates='user', lazy='dynamic')
     notification_logs = db.relationship('NotificationLog', back_populates='user', lazy='dynamic')
     
+    def get_trial_status(self):
+        """Get comprehensive trial status"""
+        if not self.is_trial:
+            return {
+                'is_trial': False,
+                'status': 'not_on_trial',
+                'subscription_active': self.subscription_active
+            }
+        
+        if self.trial_end_date:
+            remaining_time = self.trial_end_date - datetime.utcnow()
+            days_remaining = max(0, remaining_time.days)
+        else:
+            days_remaining = 0
+        
+        return {
+            'is_trial': True,
+            'status': self.trial_status,
+            'days_remaining': days_remaining,
+            'trial_end_date': self.trial_end_date.isoformat() if self.trial_end_date else None,
+            'signalwire_active': self.signalwire_number_active,
+            'phone_number': self.signalwire_phone_number,
+            'can_convert': self.trial_status in ['active', 'expired']
+        }
     
+    def get_signalwire_status(self):
+        """Get SignalWire integration status"""
+        return {
+            'setup_completed': self.signalwire_setup_completed,
+            'phone_number': self.signalwire_phone_number,
+            'phone_active': self.signalwire_number_active,
+            'subproject_id': self.signalwire_subproject_id,
+            'has_phone': bool(self.signalwire_phone_number)
+        }
+
     def set_password(self, password):
         """Set password hash"""
         hash_result = generate_password_hash(password, method='pbkdf2:sha256', salt_length=16)
