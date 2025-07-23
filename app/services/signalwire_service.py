@@ -1,7 +1,12 @@
+
 """
 UNIFIED SignalWire Service Layer - FIXED VERSION
 Consolidates ALL SignalWire functionality into ONE service
 """
+=======
+# Create a completely simplified version that avoids the problematic account access
+
+
 
 import os
 import logging
@@ -82,7 +87,7 @@ class SignalWireService:
                 'auth_token': subproject.auth_token,
                 'friendly_name': subproject.friendly_name,
                 'status': subproject.status,
-                'date_created': subproject.date_created
+                'date_created': str(subproject.date_created) if subproject.date_created else None
             }
             
         except Exception as e:
@@ -135,9 +140,9 @@ class SignalWireService:
                     'region': number.region,
                     'country': country.upper(),
                     'capabilities': {
-                        'sms': getattr(number.capabilities, 'SMS', True),
-                        'mms': getattr(number.capabilities, 'MMS', True),
-                        'voice': getattr(number.capabilities, 'voice', True)
+                        'sms': getattr(number.capabilities, 'SMS', True) if hasattr(number, 'capabilities') else True,
+                        'mms': getattr(number.capabilities, 'MMS', True) if hasattr(number, 'capabilities') else True,
+                        'voice': getattr(number.capabilities, 'voice', True) if hasattr(number, 'capabilities') else True
                     },
                     'monthly_cost': '$1.00'
                 })
@@ -194,12 +199,12 @@ class SignalWireService:
                 'phone_number_sid': purchased_number.sid,
                 'phone_number': purchased_number.phone_number,
                 'friendly_name': purchased_number.friendly_name,
-                'account_sid': purchased_number.account_sid,
+                'account_sid': getattr(purchased_number, 'account_sid', None),
                 'webhook_configured': True,
                 'webhooks': {
-                    'sms_url': purchased_number.sms_url,
-                    'voice_url': purchased_number.voice_url,
-                    'status_callback': purchased_number.status_callback
+                    'sms_url': getattr(purchased_number, 'sms_url', None),
+                    'voice_url': getattr(purchased_number, 'voice_url', None),
+                    'status_callback': getattr(purchased_number, 'status_callback', None)
                 }
             }
             
@@ -273,8 +278,8 @@ class SignalWireService:
                 'success': True,
                 'message_sid': message.sid,
                 'status': message.status,
-                'error_code': message.error_code,
-                'error_message': message.error_message
+                'error_code': getattr(message, 'error_code', None),
+                'error_message': getattr(message, 'error_message', None)
             }
             
         except Exception as e:
@@ -386,10 +391,11 @@ class SignalWireService:
 
     # =========================================================================
     # HEALTH CHECK - FIXED VERSION
+	  # SIMPLIFIED HEALTH CHECK - NO PROBLEMATIC ACCOUNT ACCES
     # =========================================================================
     
     def health_check(self) -> Dict[str, Any]:
-        """Comprehensive service health check"""
+        """SIMPLIFIED health check that avoids problematic account access"""
         try:
             # Test basic client connection by listing phone numbers
             # This is more reliable than trying to access account details
@@ -418,6 +424,43 @@ class SignalWireService:
                 'account': account_info,
                 'phone_numbers_count': len(phone_numbers),
                 'configuration': {
+            # Test 1: Basic client initialization (already done in property)
+            client_available = self.client is not None
+            
+            # Test 2: Simple API call that should work with any account type
+            # Just try to list 1 phone number - this is much more reliable
+            try:
+                phone_numbers = self.client.incoming_phone_numbers.list(limit=1)
+                api_accessible = True
+                phone_numbers_count = len(phone_numbers)
+            except Exception as api_error:
+                logger.warning(f"API test failed: {api_error}")
+                api_accessible = False
+                phone_numbers_count = 0
+            
+            # Test 3: Try available numbers search as another connectivity test
+            try:
+                available_test = self.client.available_phone_numbers('US').local.list(limit=1)
+                search_accessible = True
+            except Exception as search_error:
+                logger.warning(f"Search test failed: {search_error}")
+                search_accessible = False
+            
+            # Determine overall health
+            is_healthy = client_available and api_accessible
+            
+            return {
+                'success': is_healthy,
+                'service_status': 'healthy' if is_healthy else 'degraded',
+                'connection_tests': {
+                    'client_initialized': client_available,
+                    'api_accessible': api_accessible,
+                    'search_accessible': search_accessible
+                },
+                'phone_numbers_count': phone_numbers_count,
+                'configuration': {
+                    'project_id': self._config['project_id'][:8] + '...',  # Partial for security
+
                     'space_url': self._config['space_url'],
                     'webhook_base_url': self._config['webhook_base_url']
                 },
@@ -430,6 +473,11 @@ class SignalWireService:
                 'success': False,
                 'service_status': 'unhealthy',
                 'error': str(e),
+                'configuration': {
+                    'project_id': self._config.get('project_id', 'NOT_SET')[:8] + '...',
+                    'space_url': self._config.get('space_url', 'NOT_SET'),
+                    'webhook_base_url': self._config.get('webhook_base_url', 'NOT_SET')
+                },
                 'timestamp': datetime.utcnow().isoformat()
             }
 
