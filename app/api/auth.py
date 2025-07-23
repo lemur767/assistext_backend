@@ -93,7 +93,7 @@ def register_user():
             email=data['email'],
             first_name=data['first_name'],
             last_name=data['last_name'],
-            personal_phone=data.get('personal_phone'),
+            phone_number=data.get('phone_number'),
             
             # Trial settings
             is_trial=True,

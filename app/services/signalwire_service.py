@@ -74,6 +74,7 @@ class SignalWireService:
             
             return {
                 'success': True,
+		'user_id': user_id,
                 'subproject_sid': subproject.sid,
                 'auth_token': subproject.auth_token,
                 'friendly_name': subproject.friendly_name,
@@ -161,8 +162,7 @@ class SignalWireService:
                 'status_callback_method': 'POST'
             }
             
-            if subproject_sid:
-                purchase_params['account_sid'] = subproject_sid
+            
             
             purchased_number = self.client.incoming_phone_numbers.create(**purchase_params)
             
@@ -173,7 +173,6 @@ class SignalWireService:
                 'phone_number_sid': purchased_number.sid,
                 'phone_number': purchased_number.phone_number,
                 'friendly_name': purchased_number.friendly_name,
-                'account_sid': getattr(purchased_number, 'account_sid', None),
                 'webhook_configured': True,
                 'webhooks': {
                     'sms_url': getattr(purchased_number, 'sms_url', None),
