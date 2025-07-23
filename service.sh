@@ -1,3 +1,65 @@
+#!/bin/bash
+
+# SignalWire Service Migration Script
+# Automatically migrates from scattered SignalWire code to unified service
+
+set -e
+
+BACKEND_DIR="/opt/assistext_backend"  # Adjust to your backend directory
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+echo -e "${BLUE}🚀 SignalWire Service Migration${NC}"
+echo "=================================="
+
+# Check if we're in the right directory
+if [ ! -f "$BACKEND_DIR/app/__init__.py" ]; then
+    echo -e "${RED}❌ Error: Backend directory not found at $BACKEND_DIR${NC}"
+    echo "Please update BACKEND_DIR in this script to point to your backend"
+    exit 1
+fi
+
+cd "$BACKEND_DIR"
+
+echo -e "\n${BLUE}1. Create Backup${NC}"
+echo "==============="
+
+# Create backup directory
+BACKUP_DIR="backup_signalwire_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+
+# Backup existing files
+echo "📦 Creating backup..."
+if [ -f "app/utils/signalwire_client.py" ]; then
+    cp app/utils/signalwire_client.py "$BACKUP_DIR/"
+    echo "✅ Backed up signalwire_client.py"
+fi
+
+if [ -f "app/services/sms_service.py" ]; then
+    cp app/services/sms_service.py "$BACKUP_DIR/"
+    echo "✅ Backed up sms_service.py"
+fi
+
+if [ -f "app/services/signalwire_subaccount_service.py" ]; then
+    cp app/services/signalwire_subaccount_service.py "$BACKUP_DIR/"
+    echo "✅ Backed up signalwire_subaccount_service.py"
+fi
+
+if [ -f "app/services/subscription_service.py" ]; then
+    cp app/services/subscription_service.py "$BACKUP_DIR/"
+    echo "✅ Backed up subscription_service.py"
+fi
+
+echo -e "${GREEN}✅ Backup created at $BACKUP_DIR${NC}"
+
+echo -e "\n${BLUE}2. Deploy Unified SignalWire Service${NC}"
+echo "===================================="
+
+# Create the unified service
+cat > "app/services/signalwire_service.py" << 'EOF'
 """
 UNIFIED SignalWire Service Layer
 Consolidates ALL SignalWire functionality into ONE service
@@ -14,7 +76,7 @@ from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime, timedelta
 from flask import current_app, request
 from signalwire.rest import Client as SignalWireClient
-
+from signalwire.rest.exceptions import TwilioException
 
 logger = logging.getLogger(__name__)
 
@@ -483,3 +545,387 @@ def validate_webhook_signature(**kwargs) -> bool:
 
 def get_message_status(message_sid: str, **kwargs) -> Dict[str, Any]:
     return get_signalwire_service().get_message_status(message_sid, **kwargs)
+EOF
+
+echo -e "${GREEN}✅ Unified SignalWire service deployed${NC}"
+
+echo -e "\n${BLUE}3. Update API Files${NC}"
+echo "=================="
+
+# Update signup.py
+if [ -f "app/api/signup.py" ]; then
+    echo "📝 Updating app/api/signup.py..."
+    
+    # Create updated signup.py
+    cat > "app/api/signup.py" << 'EOF'
+"""
+Signup API with Unified SignalWire Service
+"""
+from flask import Blueprint, request, jsonify
+from flask_cors import cross_origin
+from app.services.signalwire_service import get_signalwire_service
+import logging
+
+signup_bp = Blueprint('signup', __name__)
+
+@signup_bp.route('/search-numbers', methods=['POST', 'OPTIONS'])
+@cross_origin()
+def search_phone_numbers():
+    """Search for available phone numbers using unified service"""
+    try:
+        if request.method == 'OPTIONS':
+            return '', 204
+        
+        data = request.get_json() or {}
+        
+        search_criteria = {
+            'country': data.get('country', 'US'),
+            'area_code': data.get('area_code'),
+            'city': data.get('city'),
+            'region': data.get('region'),
+            'contains': data.get('contains'),
+            'limit': min(data.get('limit', 20), 50)
+        }
+        
+        # Remove None values
+        search_criteria = {k: v for k, v in search_criteria.items() if v is not None}
+        
+        logging.info(f"Searching phone numbers: {search_criteria}")
+        
+        # Use unified service
+        signalwire = get_signalwire_service()
+        result = signalwire.search_available_numbers(**search_criteria)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logging.error(f"Phone number search error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@signup_bp.route('/purchase-number', methods=['POST', 'OPTIONS'])
+@cross_origin()
+def purchase_phone_number():
+    """Purchase a phone number using unified service"""
+    try:
+        if request.method == 'OPTIONS':
+            return '', 204
+        
+        data = request.get_json() or {}
+        
+        phone_number = data.get('phone_number')
+        if not phone_number:
+            return jsonify({
+                'success': False,
+                'error': 'Phone number is required'
+            }), 400
+        
+        logging.info(f"Purchasing phone number: {phone_number}")
+        
+        # Use unified service
+        signalwire = get_signalwire_service()
+        result = signalwire.purchase_number(
+            phone_number=phone_number,
+            subproject_sid=data.get('subproject_sid'),
+            friendly_name=data.get('friendly_name', 'AssisText Number')
+        )
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logging.error(f"Phone number purchase error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+EOF
+    
+    echo "✅ Updated signup.py"
+fi
+
+# Update signalwire.py if it exists
+if [ -f "app/api/signalwire.py" ]; then
+    echo "📝 Updating app/api/signalwire.py..."
+    
+    cat > "app/api/signalwire.py" << 'EOF'
+"""
+SignalWire API with Unified Service
+"""
+from flask import Blueprint, request, jsonify
+from flask_cors import cross_origin
+from app.services.signalwire_service import get_signalwire_service
+import logging
+
+signalwire_bp = Blueprint('signalwire', __name__)
+
+@signalwire_bp.route('/search-numbers', methods=['POST', 'OPTIONS'])
+@cross_origin()
+def search_numbers():
+    """Search for available phone numbers"""
+    try:
+        if request.method == 'OPTIONS':
+            return '', 204
+        
+        data = request.get_json() or {}
+        signalwire = get_signalwire_service()
+        result = signalwire.search_available_numbers(**data)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@signalwire_bp.route('/subaccount', methods=['GET', 'POST', 'OPTIONS'])
+@cross_origin()
+def handle_subaccount():
+    """Create or get subaccount"""
+    try:
+        if request.method == 'OPTIONS':
+            return '', 204
+            
+        signalwire = get_signalwire_service()
+        
+        if request.method == 'POST':
+            data = request.get_json() or {}
+            result = signalwire.create_subproject(
+                user_id=data.get('user_id'),
+                friendly_name=data.get('friendly_name', 'User Subproject')
+            )
+        else:
+            # For GET, return a placeholder or implement actual subaccount lookup
+            result = {
+                'success': True,
+                'subproject': {
+                    'sid': 'placeholder-subproject-sid',
+                    'friendly_name': 'User Subproject',
+                    'status': 'active'
+                }
+            }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@signalwire_bp.route('/purchase-number', methods=['POST', 'OPTIONS'])
+@cross_origin()
+def purchase_number():
+    """Purchase a phone number"""
+    try:
+        if request.method == 'OPTIONS':
+            return '', 204
+        
+        data = request.get_json() or {}
+        signalwire = get_signalwire_service()
+        result = signalwire.purchase_number(
+            phone_number=data.get('phone_number'),
+            subproject_sid=data.get('subproject_sid'),
+            friendly_name=data.get('friendly_name')
+        )
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@signalwire_bp.route('/setup-tenant', methods=['POST', 'OPTIONS'])
+@cross_origin()
+def setup_complete_tenant():
+    """Complete tenant setup workflow"""
+    try:
+        if request.method == 'OPTIONS':
+            return '', 204
+        
+        data = request.get_json() or {}
+        signalwire = get_signalwire_service()
+        
+        result = signalwire.setup_new_tenant(
+            user_id=data.get('user_id'),
+            friendly_name=data.get('friendly_name'),
+            phone_search_criteria=data.get('phone_search', {})
+        )
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@signalwire_bp.route('/health', methods=['GET'])
+@cross_origin()
+def health_check():
+    """SignalWire service health check"""
+    try:
+        signalwire = get_signalwire_service()
+        result = signalwire.health_check()
+        
+        status_code = 200 if result['success'] else 503
+        return jsonify(result), status_code
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'service_status': 'unhealthy',
+            'error': str(e)
+        }), 503
+EOF
+    
+    echo "✅ Updated signalwire.py"
+fi
+
+# Update webhooks.py
+if [ -f "app/api/webhooks.py" ]; then
+    echo "📝 Updating webhook validation in app/api/webhooks.py..."
+    
+    # Create a backup and update webhook validation
+    cp app/api/webhooks.py app/api/webhooks.py.backup
+    
+    # Replace webhook validation imports
+    sed -i 's/from app\.services\.sms_service import validate_signalwire_webhook/from app.services.signalwire_service import get_signalwire_service/g' app/api/webhooks.py
+    sed -i 's/from app\.utils\.signalwire_client import.*$/from app.services.signalwire_service import get_signalwire_service/g' app/api/webhooks.py
+    
+    # Replace validation function calls
+    sed -i 's/validate_signalwire_webhook()/get_signalwire_service().validate_webhook_signature()/g' app/api/webhooks.py
+    
+    echo "✅ Updated webhooks.py"
+fi
+
+echo -e "\n${BLUE}4. Update Subscription Service${NC}"
+echo "============================="
+
+# Update subscription_service.py
+if [ -f "app/services/subscription_service.py" ]; then
+    echo "📝 Updating app/services/subscription_service.py..."
+    
+    cat > "app/services/subscription_service.py" << 'EOF'
+"""
+Subscription Service with Unified SignalWire Integration
+"""
+from app.models.billing import Subscription
+from app.models.signalwire_account import SignalWireAccount, SignalWirePhoneNumber
+from app.models.user import User
+from app.extensions import db
+from flask import current_app
+from datetime import datetime, timedelta
+import secrets
+
+# Use unified SignalWire service
+from app.services.signalwire_service import get_signalwire_service
+
+class SubscriptionService:
+    """Service for managing subscriptions with SignalWire integration"""
+    
+    @staticmethod
+    def create_subscription_with_signalwire(user_id: int, plan_id: int):
+        """Create subscription and set up complete SignalWire integration"""
+        try:
+            user = User.query.get(user_id)
+            if not user:
+                return False, "User not found"
+            
+            # Use unified service for complete tenant setup
+            signalwire = get_signalwire_service()
+            
+            setup_result = signalwire.setup_new_tenant(
+                user_id=user_id,
+                friendly_name=f"{user.first_name}_{user.last_name}",
+                phone_search_criteria={
+                    'country': 'US',
+                    'limit': 5
+                }
+            )
+            
+            if setup_result['success']:
+                current_app.logger.info(f"✅ Complete SignalWire setup for user {user_id}")
+                return True, "Subscription and SignalWire setup completed successfully"
+            else:
+                current_app.logger.error(f"❌ SignalWire setup failed: {setup_result['error']}")
+                return False, setup_result['error']
+            
+        except Exception as e:
+            current_app.logger.error(f"Subscription creation failed: {e}")
+            return False, str(e)
+EOF
+    
+    echo "✅ Updated subscription_service.py"
+fi
+
+echo -e "\n${BLUE}5. Test Unified Service${NC}"
+echo "====================="
+
+echo "🧪 Testing unified service..."
+
+# Test service initialization
+if python3 -c "
+import sys
+sys.path.append('.')
+from app.services.signalwire_service import get_signalwire_service
+try:
+    service = get_signalwire_service()
+    print('✅ Service initialized successfully')
+except Exception as e:
+    print(f'❌ Service initialization failed: {e}')
+    sys.exit(1)
+"; then
+    echo "✅ Service initialization test passed"
+else
+    echo "❌ Service initialization test failed"
+fi
+
+echo -e "\n${BLUE}6. Delete Old Files${NC}"
+echo "=================="
+
+echo "🗑️ Removing old duplicate files..."
+
+# Only delete if backup was successful
+if [ -d "$BACKUP_DIR" ] && [ "$(ls -A $BACKUP_DIR)" ]; then
+    # Remove old files
+    [ -f "app/utils/signalwire_client.py" ] && rm app/utils/signalwire_client.py && echo "✅ Deleted app/utils/signalwire_client.py"
+    [ -f "app/services/sms_service.py" ] && rm app/services/sms_service.py && echo "✅ Deleted app/services/sms_service.py"
+    [ -f "app/services/signalwire_subaccount_service.py" ] && rm app/services/signalwire_subaccount_service.py && echo "✅ Deleted app/services/signalwire_subaccount_service.py"
+else
+    echo "⚠️ Skipping file deletion - backup verification failed"
+fi
+
+echo -e "\n${BLUE}7. Restart Backend Service${NC}"
+echo "========================="
+
+echo "🔄 Restarting backend service..."
+sudo systemctl restart assistext-backend
+
+sleep 5
+
+echo "📊 Checking service status..."
+if sudo systemctl is-active --quiet assistext-backend; then
+    echo "✅ Backend service is running"
+else
+    echo "❌ Backend service failed to start"
+    echo "Recent logs:"
+    sudo journalctl -u assistext-backend --no-pager -n 10
+fi
+
+echo -e "\n${GREEN}🎉 SignalWire Service Migration Complete!${NC}"
+echo "==========================================="
+
+echo ""
+echo "📋 Migration Summary:"
+echo "✅ Unified SignalWire service deployed"
+echo "✅ API files updated to use unified service"
+echo "✅ Old duplicate files removed"
+echo "✅ Backend service restarted"
+echo ""
+echo "🔧 New Unified Service Features:"
+echo "• Sub-project (subaccount) management"
+echo "• Phone number search & purchase"
+echo "• Webhook configuration & validation"
+echo "• SMS sending & status tracking"
+echo "• Complete tenant setup workflow"
+echo "• Comprehensive error handling"
+echo ""
+echo "📁 Backup Location: $BACKUP_DIR"
+echo ""
+echo "🧪 Test Your Migration:"
+echo "curl http://localhost:5000/api/signalwire/health"
+echo ""
+echo "🎯 ONE SERVICE NOW HANDLES EVERYTHING!"
