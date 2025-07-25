@@ -2,7 +2,8 @@
 .env
 .env.*
 !.env.example
-
+.gemini
+.bmad*
 # Python
 __pycache__/
 *.py[cod]
