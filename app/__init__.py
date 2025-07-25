@@ -142,7 +142,7 @@ def register_blueprints(app):
         ('app.api.signalwire', 'signalwire_bp', '/api/signalwire', True),
         
         # Feature blueprints (optional)
-        ('app.api.sync_webhooks', 'sync_webhooks_bp', '/api/sync-webhooks', True),
+        ('app.api.sync_webhooks', 'sync_webhooks_bp', '/api/webhooks/sync', True),
         ('app.api.messages', 'messages_bp', '/api/messages', False),
         ('app.api.clients', 'clients_bp', '/api/clients', False),
         ('app.api.signup', 'signup_bp', '/api/signup', True),
