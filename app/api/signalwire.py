@@ -3,7 +3,7 @@ SignalWire API with Unified Service
 """
 from flask import Blueprint, request, jsonify
 from flask_cors import cross_origin
-from app.services.signalwire_service import get_signalwire_service
+from app.services.signalwire_service import SignalWireService
 import logging
 
 signalwire_bp = Blueprint('signalwire', __name__)
@@ -17,7 +17,7 @@ def search_numbers():
             return '', 204
         
         data = request.get_json() or {}
-        signalwire = get_signalwire_service()
+        signalwire = SignalWireService()
         result = signalwire.search_available_numbers(**data)
         
         return jsonify(result)
@@ -33,7 +33,7 @@ def handle_subaccount():
         if request.method == 'OPTIONS':
             return '', 204
             
-        signalwire = get_signalwire_service()
+        signalwire = SignalWireService()
         
         if request.method == 'POST':
             data = request.get_json() or {}
@@ -66,7 +66,7 @@ def purchase_number():
             return '', 204
         
         data = request.get_json() or {}
-        signalwire = get_signalwire_service()
+        signalwire = SignalWireService()
         result = signalwire.purchase_number(
             phone_number=data.get('phone_number'),
             subproject_sid=data.get('subproject_sid'),
@@ -87,7 +87,7 @@ def setup_complete_tenant():
             return '', 204
         
         data = request.get_json() or {}
-        signalwire = get_signalwire_service()
+        signalwire = SignalWireService()
         
         result = signalwire.setup_new_tenant(
             user_id=data.get('user_id'),
@@ -105,7 +105,7 @@ def setup_complete_tenant():
 def health_check():
     """SignalWire service health check"""
     try:
-        signalwire = get_signalwire_service()
+        signalwire = SignalWireService()
         result = signalwire.health_check()
         
         status_code = 200 if result['success'] else 503

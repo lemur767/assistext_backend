@@ -8,10 +8,10 @@ from typing import Dict, List, Any, Optional
 from sqlalchemy import func, and_, or_
 from app.extensions import db
 from app.models.subscription import Subscription
-from app.models.usage import Usage, UsageOverage
-from app.models.message import Message
-from app.models.profile import Profile
-from app.models.billing_settings import BillingSettings
+from app.models.usage import  UsageOverage, UseageRecord
+
+
+
 from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ class UsageTracker:
     """Service for tracking and managing subscription usage"""
     
     @classmethod
-    def initialize_usage_for_subscription(cls, subscription_id: str) -> Usage:
+    def initialize_usage_for_subscription(cls, subscription_id: str) -> UseageRecord:
         """Initialize usage tracking for a new subscription"""
         try:
             subscription = Subscription.query.get(subscription_id)
@@ -35,7 +35,7 @@ class UsageTracker:
             period_end = subscription.current_period_end
             
             # Create usage record
-            usage = Usage(
+            usage = UseageRecord(
                 user_id=subscription.user_id,
                 subscription_id=subscription_id,
                 period_start=period_start,
@@ -70,7 +70,7 @@ class UsageTracker:
             
             usage = cls._get_current_usage(subscription.id)
             if not usage:
-                return {'success': False, 'error': 'Usage tracking not initialized'}
+                return {'success': False, 'error': 'UseageRecord tracking not initialized'}
             
             # Calculate SMS credits needed (basic calculation)
             credits_needed = cls._calculate_sms_credits(message_content)
@@ -125,7 +125,7 @@ class UsageTracker:
             
             usage = cls._get_current_usage(subscription.id)
             if not usage:
-                return {'success': False, 'error': 'Usage tracking not initialized'}
+                return {'success': False, 'error': 'UseageRecord tracking not initialized'}
             
             # Update usage
             usage.sms_received += 1
@@ -150,7 +150,7 @@ class UsageTracker:
             
             usage = cls._get_current_usage(subscription.id)
             if not usage:
-                return {'success': False, 'error': 'Usage tracking not initialized'}
+                return {'success': False, 'error': 'UseageRecord tracking not initialized'}
             
             # Calculate AI credits needed based on tokens
             credits_needed = cls._calculate_ai_credits(prompt_tokens, response_tokens)
@@ -203,7 +203,7 @@ class UsageTracker:
             
             usage = cls._get_current_usage(subscription.id)
             if not usage:
-                return {'success': False, 'error': 'Usage tracking not initialized'}
+                return {'success': False, 'error': 'UseageRecord tracking not initialized'}
             
             # Check if storage limit would be exceeded
             new_storage_total = usage.storage_used_gb + additional_gb
@@ -247,7 +247,7 @@ class UsageTracker:
             
             usage = cls._get_current_usage(subscription.id)
             if not usage:
-                return {'success': False, 'error': 'Usage tracking not initialized'}
+                return {'success': False, 'error': 'UseageRecord tracking not initialized'}
             
             # Check API call limit
             if usage.api_calls_made >= usage.api_calls_limit:
@@ -286,29 +286,22 @@ class UsageTracker:
             
             usage = cls._get_current_usage(subscription.id)
             if not usage:
-                return {'success': False, 'error': 'Usage tracking not initialized'}
+                return {'success': False, 'error': 'UseageRecord tracking not initialized'}
             
-            # Count active profiles
-            active_profiles = Profile.query.filter_by(user_id=user_id, is_active=True).count()
+          
             
-            # Check profile limit
+           
             plan_features = subscription.plan.features
-            max_profiles = plan_features.get('max_profiles', 1)
+                
+        
             
-            if active_profiles > max_profiles:
-                return {'success': False, 'error': f'Profile limit exceeded. Maximum: {max_profiles}'}
-            
-            # Update usage
-            usage.active_profiles = active_profiles
-            usage.last_updated = datetime.utcnow()
+        
             
             db.session.commit()
             
             return {
                 'success': True,
-                'active_profiles': active_profiles,
-                'max_profiles': max_profiles,
-                'profiles_remaining': max_profiles - active_profiles
+             
             }
             
         except Exception as e:
@@ -325,28 +318,28 @@ class UsageTracker:
             
             # Determine grouping based on granularity
             if granularity == 'day':
-                date_trunc = func.date_trunc('day', Usage.created_at)
+                date_trunc = func.date_trunc('day', UseageRecord.created_at)
             elif granularity == 'week':
-                date_trunc = func.date_trunc('week', Usage.created_at)
+                date_trunc = func.date_trunc('week', UseageRecord.created_at)
             elif granularity == 'month':
-                date_trunc = func.date_trunc('month', Usage.created_at)
+                date_trunc = func.date_trunc('month', UseageRecord.created_at)
             else:
-                date_trunc = func.date_trunc('day', Usage.created_at)
+                date_trunc = func.date_trunc('day', UseageRecord.created_at)
             
             # Query usage data
             results = db.session.query(
                 date_trunc.label('date'),
-                func.max(Usage.sms_sent).label('sms_sent'),
-                func.max(Usage.sms_received).label('sms_received'),
-                func.max(Usage.ai_responses_generated).label('ai_responses'),
-                func.max(Usage.api_calls_made).label('api_calls'),
-                func.max(Usage.active_profiles).label('active_profiles'),
-                func.max(Usage.total_conversations).label('total_conversations'),
-                func.max(Usage.storage_used_gb).label('storage_used_gb')
+                func.max(UseageRecord.sms_sent).label('sms_sent'),
+                func.max(UseageRecord.sms_received).label('sms_received'),
+                func.max(UseageRecord.ai_responses_generated).label('ai_responses'),
+                func.max(UseageRecord.api_calls_made).label('api_calls'),
+                func.max(UseageRecord.active_profiles).label('active_profiles'),
+                func.max(UseageRecord.total_conversations).label('total_conversations'),
+                func.max(UseageRecord.storage_used_gb).label('storage_used_gb')
             ).filter(
-                Usage.subscription_id == subscription_id,
-                Usage.created_at >= start_dt,
-                Usage.created_at <= end_dt
+                UseageRecord.subscription_id == subscription_id,
+                UseageRecord.created_at >= start_dt,
+                UseageRecord.created_at <= end_dt
             ).group_by(date_trunc).order_by(date_trunc).all()
             
             # Format results
@@ -381,7 +374,7 @@ class UsageTracker:
             plan_features = subscription.plan.features
             
             # Create new usage record for the new period
-            new_usage = Usage(
+            new_usage = UseageRecord(
                 user_id=subscription.user_id,
                 subscription_id=subscription_id,
                 period_start=subscription.current_period_start,
@@ -399,7 +392,7 @@ class UsageTracker:
             db.session.commit()
             
             logger.info(f"Reset usage tracking for subscription {subscription_id} new period")
-            return {'success': True, 'message': 'Usage reset for new period'}
+            return {'success': True, 'message': 'UseageRecord reset for new period'}
             
         except Exception as e:
             db.session.rollback()
@@ -417,12 +410,12 @@ class UsageTracker:
         ).first()
     
     @classmethod
-    def _get_current_usage(cls, subscription_id: str) -> Optional[Usage]:
+    def _get_current_usage(cls, subscription_id: str) -> Optional[UseageRecord]:
         """Get current usage record for subscription"""
-        return Usage.query.filter(
-            Usage.subscription_id == subscription_id,
-            Usage.period_start <= datetime.utcnow(),
-            Usage.period_end >= datetime.utcnow()
+        return UseageRecord.query.filter(
+            UseageRecord.subscription_id == subscription_id,
+            UseageRecord.period_start <= datetime.utcnow(),
+            UseageRecord.period_end >= datetime.utcnow()
         ).first()
     
     @classmethod
@@ -476,15 +469,11 @@ class UsageTracker:
         db.session.add(overage)
     
     @classmethod
-    def _check_usage_alerts(cls, user_id: str, usage: Usage):
+    def _check_usage_alerts(cls, user_id: str, usage: UseageRecord):
         """Check if usage alerts should be sent"""
         try:
-            # Get billing settings for alert thresholds
-            billing_settings = BillingSettings.query.filter_by(user_id=user_id).first()
-            if not billing_settings or not billing_settings.notifications.get('usage_alerts', True):
-                return
-            
-            thresholds = billing_settings.usage_alert_thresholds
+            #TODO get subscription max allowances
+         
             
             # Check SMS credits
             sms_total = usage.sms_credits_used + usage.sms_credits_remaining
@@ -528,7 +517,7 @@ class UsageTracker:
             logger.error(f"Error sending usage notification: {str(e)}")
 
 
-# Usage tracking middleware for automatic tracking
+# UseageRecord tracking middleware for automatic tracking
 class UsageTrackingMiddleware:
     """Middleware to automatically track certain usage events"""
     
@@ -567,7 +556,7 @@ class UsageTrackingMiddleware:
                         
             except Exception as e:
                 # Don't fail the request if usage tracking fails
-                logger.warning(f"Usage tracking failed: {str(e)}")
+                logger.warning(f"UseageRecord tracking failed: {str(e)}")
     
     def after_request(self, response):
         """Track successful operations after request"""

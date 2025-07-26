@@ -9,7 +9,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.extensions import db
 from app.models.user import User
 from app.models.subscription import Subscription
-# from app.tasks.trial_tasks import reactivate_user_after_subscription
+from app.tasks.trial_tasks import reactivate_user_after_subscription
 try:
     from app.tasks.trial_tasks import reactivate_user_after_subscription
 except ImportError:
@@ -20,7 +20,7 @@ except ImportError:
             def delay(self, *a, **kw):
                 return self
         return DummyTask()
-from app.services.signalwire_service import get_signalwire_service
+from app.services.signalwire_service import SignalWireService
 from datetime import datetime
 import logging
 
@@ -87,7 +87,7 @@ def activate_subscription():
         signalwire_status = "unknown"
         if user.signalwire_phone_sid:
             try:
-                signalwire = get_signalwire_service()
+                signalwire = SignalWireService()
                 phone_status = signalwire.get_phone_number_status(user.signalwire_phone_sid)
                 signalwire_status = phone_status.get('status', 'unknown')
             except Exception as e:
@@ -286,7 +286,7 @@ def get_user_billing_status(user_id):
         signalwire_status = None
         if user.signalwire_phone_sid:
             try:
-                signalwire = get_signalwire_service()
+                signalwire = SignalWireService()
                 signalwire_status = signalwire.get_phone_number_status(user.signalwire_phone_sid)
             except Exception as e:
                 logging.warning(f"Could not get SignalWire status: {e}")

@@ -3,8 +3,9 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from app.config import config
-from app.extensions import db, migrate, jwt
+from app.extensions import db, migrate, jwt, mail
 import logging
+from app.services.signalwire_service import SignalWireService
 
 def create_app(config_name=None):
     """Application factory pattern"""

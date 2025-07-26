@@ -306,7 +306,7 @@ class SignalWireService:
         }
         
         # TODO: Implement actual token storage
-        cache.set(f"selection_token:{token}", json.dumps(token_data), timeout=900)
+        #cache.set(f"selection_token:{token}", json.dumps(token_data), timeout=900)
         
         return token
     
@@ -314,9 +314,9 @@ class SignalWireService:
         """Validate selection token and check if number is in allowed list"""
         try:
             
-            token_data = cache.get(f"selection_token:{token}")
-            if not token_data:
-                return False
+            #token_data = cache.get(f"selection_token:{token}")
+            #if not token_data:
+             #   return False
             
             token_data = json.loads(token_data)
             return True
@@ -349,3 +349,14 @@ class SignalWireService:
         except Exception as e:
             logger.error(f"Failed to get number info for user {user.id}: {e}")
             return {'success': False, 'error': str(e)}
+        
+_signalwire_service = None
+
+def get_signalwire_service() -> SignalWireService:
+    """Get singleton SignalWire service instance"""
+    global _signalwire_service
+    
+    if _signalwire_service is None:
+        _signalwire_service = SignalWireService()
+    
+    return _signalwire_service

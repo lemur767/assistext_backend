@@ -7,7 +7,7 @@ from celery import Celery
 from flask import current_app, render_template
 from flask_mail import Message
 from datetime import datetime, timedelta
-from app.extensions import mail, db
+from app.extensions import Mail, db
 from app.models.user import User
 from app.models.subscription import Subscription, SubscriptionPlan
 import logging
@@ -360,7 +360,7 @@ def _send_email_with_template(to_email, subject, template, email_data):
                           f"Best regards,\nThe AssisText Team"
             
             # Send email
-            mail.send(msg)
+            Mail.send(msg)
             
     except Exception as e:
         logger.error(f"Failed to send email to {to_email}: {e}")
