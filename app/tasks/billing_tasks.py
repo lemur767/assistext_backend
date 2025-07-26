@@ -61,7 +61,7 @@ def process_monthly_billing():
             signalwire_service = SignalWireService(user)
             
             # Update usage tracking
-            signalwire_service.update_usage_tracking() = signalwire_service.update_usage_tracking()
+            signalwire_service.update_usage_tracking() 
             
             # Update usage tracking one final time
             signalwire_service.update_usage_tracking()
