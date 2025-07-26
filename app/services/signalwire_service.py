@@ -352,11 +352,53 @@ class SignalWireService:
         
 _signalwire_service = None
 
-def get_signalwire_service() -> SignalWireService:
-    """Get singleton SignalWire service instance"""
+def get_signalwire_service():
+    """
+    Get singleton SignalWire service instance
+    
+    Returns:
+        SignalWireService: Configured SignalWire service instance
+    """
     global _signalwire_service
     
     if _signalwire_service is None:
         _signalwire_service = SignalWireService()
     
     return _signalwire_service
+
+# =========================================================================
+# BACKWARD COMPATIBILITY FUNCTIONS
+# =========================================================================
+
+def search_phone_numbers(**kwargs):
+    """Backward compatible function for phone number search"""
+    return get_signalwire_service().search_available_numbers(**kwargs)
+
+def purchase_phone_number(phone_number: str, subproject_sid: str = None, **kwargs):
+    """Backward compatible function for phone number purchase"""
+    service = get_signalwire_service()
+    # Note: You may need to adapt this based on your actual service methods
+    return service.purchase_phone_number(phone_number, subproject_sid, **kwargs)
+
+def send_sms(from_number: str, to_number: str, message_body: str, **kwargs):
+    """Backward compatible function for SMS sending"""
+    return get_signalwire_service().send_sms(from_number, to_number, message_body, **kwargs)
+
+def validate_webhook_signature(**kwargs):
+    """Backward compatible function for webhook validation"""
+    return get_signalwire_service().validate_webhook_signature(**kwargs)
+
+def get_message_status(message_sid: str, **kwargs):
+    """Backward compatible function for message status"""
+    return get_signalwire_service().get_message_status(message_sid, **kwargs)
+
+# Export the main function and classes
+__all__ = [
+    'SignalWireService',
+    'get_signalwire_service',
+    'search_phone_numbers',
+    'purchase_phone_number', 
+    'send_sms',
+    'validate_webhook_signature',
+    'get_message_status'
+]
