@@ -14,9 +14,9 @@ def initialize_stripe():
 def create_subscription(user_id, plan_id, payment_method_id):
     """Create a new subscription for a user"""
     from app.models.user import User
-    from app.models.billing import SubscriptionPlan, Subscription, Invoice
-    from app.models.payment import PaymentMethod
-    from app.models.subscription_payment_method import SubscriptionPaymentMethod
+    from app.models.subscription import SubscriptionPlan, Subscription
+    from app.models.billing import PaymentMethod
+  
     
     initialize_stripe()
     

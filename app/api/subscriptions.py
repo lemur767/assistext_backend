@@ -1,8 +1,8 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.services.subscription_service import SubscriptionService
-from app.models.billing import Subscription
-from app.models.signalwire_account import SignalWireAccount
+from app.models import Subscription
+from app.services.billing_service import get_billing_service 
+
 from app.extensions import db
 
 subscription_bp = Blueprint('subscription', __name__)

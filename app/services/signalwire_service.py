@@ -1,144 +1,147 @@
-"""
-UNIFIED SignalWire Service Layer
-Consolidates ALL SignalWire functionality into ONE service
-"""
-
+# app/services/signalwire_service.py - Separated functions with clear responsibilities
 import os
 import logging
-import hmac
-import hashlib
-import base64
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
-from datetime import datetime
-from flask import request
+import json
+import secrets
 from signalwire.rest import Client as SignalWireClient
 
 logger = logging.getLogger(__name__)
 
-class SignalWireServiceError(Exception):
-    """Custom exception for SignalWire service errors"""
-    pass
-
 class SignalWireService:
-    """UNIFIED SignalWire Service"""
-    
     def __init__(self):
-        self._client = None
-        self._config = self._load_config()
-        self._validate_config()
-    
-    def _load_config(self):
-        """Load SignalWire configuration from environment"""
-        return {
-            'project_id': os.getenv('SIGNALWIRE_PROJECT_ID') or os.getenv('SIGNALWIRE_PROJECT'),
-            'auth_token': os.getenv('SIGNALWIRE_AUTH_TOKEN') or os.getenv('SIGNALWIRE_TOKEN'),  
-            'space_url': os.getenv('SIGNALWIRE_SPACE_URL') or os.getenv('SIGNALWIRE_SPACE'),
-            'webhook_base_url': os.getenv('WEBHOOK_BASE_URL', 'https://backend.assitext.ca')
-        }
-    
-    def _validate_config(self):
-        """Validate required configuration"""
-        required_fields = ['project_id', 'auth_token', 'space_url']
-        missing = [field for field in required_fields if not self._config.get(field)]
+        self.project_id = os.getenv('SIGNALWIRE_PROJECT_ID')
+        self.auth_token = os.getenv('SIGNALWIRE_AUTH_TOKEN')
+        self.space = os.getenv('SIGNALWIRE_SPACE_URL').replace('https://', '')
+        self.webhook_base_url = os.getenv('WEBHOOK_BASE_URL')
         
-        if missing:
-            raise SignalWireServiceError(f"Missing required SignalWire config: {', '.join(missing)}")
-    
-    @property
-    def client(self):
-        """Lazy-load SignalWire client"""
-        if self._client is None:
-            try:
-                self._client = SignalWireClient(
-                    self._config['project_id'],
-                    self._config['auth_token'],
-                    signalwire_space_url=self._config['space_url']
-                )
-                logger.info("SignalWire client initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize SignalWire client: {e}")
-                raise SignalWireServiceError(f"SignalWire connection failed: {e}")
-        
-        return self._client
+        # Main account client
+        self.client = SignalWireClient(
+            self.project_id,
+            self.auth_token,
+            signalwire_space_url=f"https://{self.space}"
+        )
 
-    def create_subproject(self, user_id, friendly_name):
-        """Create a dedicated sub-project for multi-tenant isolation"""
+    # ============================================================================
+    # SUBPROJECT MANAGEMENT
+    # ============================================================================
+    
+    def create_subproject_for_user(self, user_id: int, username: str, email: str) -> Dict[str, Any]:
+        """Create dedicated subproject for user during registration"""
         try:
-            subproject_name = f"User_{user_id}_{friendly_name}"
+            friendly_name = f"AssisText-{username}-{user_id}"
             
+            logger.info(f"Creating subproject for user {user_id}: {friendly_name}")
+            
+            # Create subproject under main account
             subproject = self.client.api.accounts.create(
-                friendly_name=subproject_name
+                friendly_name=friendly_name
             )
             
-            logger.info(f"Created subproject: {subproject.sid} for user {user_id}")
+            logger.info(f"✅ Created subproject {subproject.sid} for user {user_id}")
             
             return {
                 'success': True,
-		'user_id': user_id,
                 'subproject_sid': subproject.sid,
-                'auth_token': subproject.auth_token,
+                'subproject_token': subproject.auth_token,
                 'friendly_name': subproject.friendly_name,
                 'status': subproject.status,
-                'date_created': str(subproject.date_created) if subproject.date_created else None
+                'created_at': subproject.date_created
             }
             
         except Exception as e:
-            logger.error(f"Subproject creation failed: {e}")
+            logger.error(f"❌ Subproject creation failed for user {user_id}: {e}")
             return {
                 'success': False,
                 'error': str(e)
             }
-
-    def search_available_numbers(self, country='US', area_code=None, city=None, region=None, contains=None, limit=20):
-        """Search for available phone numbers"""
+    
+    def get_subproject_client(self, user):
+        """Get SignalWire client for user's subproject"""
         try:
-            limit = min(limit, 50)
+            if not user.signalwire_subproject_sid or not user.signalwire_subproject_token:
+                raise Exception("User does not have subproject configured")
             
-            search_params = {}
-            if area_code:
-                search_params['area_code'] = area_code
-            if city:
-                search_params['in_locality'] = city
-            if region:
-                search_params['in_region'] = region
-            if contains:
-                search_params['contains'] = contains
+            return SignalWireClient(
+                user.signalwire_subproject_sid,
+                user.signalwire_subproject_token,
+                signalwire_space_url=f"https://{self.space}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to get subproject client for user {user.id}: {e}")
+            return None
+
+    # ============================================================================
+    # PHONE NUMBER SEARCH
+    # ============================================================================
+    
+    def search_available_numbers(self, user, search_criteria: Dict[str, Any]) -> Dict[str, Any]:
+        """Search available numbers using user's subproject"""
+        try:
+            # Get subproject client
+            subproject_client = self.get_subproject_client(user)
+            if not subproject_client:
+                return {
+                    'success': False,
+                    'error': 'User subproject not configured'
+                }
             
+            # Search parameters
+            country = search_criteria.get('country', 'CA')
+            area_code = search_criteria.get('area_code')
+            locality = search_criteria.get('locality')
+            limit = min(search_criteria.get('limit', 5), 10)
+            
+            logger.info(f"Searching numbers for user {user.id} in {country} area {area_code}")
+            
+            # Search available numbers
             if country.upper() == 'CA':
-                numbers = self.client.available_phone_numbers('CA').local.list(
-                    limit=limit, sms_enabled=True, voice_enabled=True, **search_params
+                available_numbers = subproject_client.available_phone_numbers('CA').local.list(
+                    area_code=area_code,
+                    in_locality=locality,
+                    limit=limit
                 )
             else:
-                numbers = self.client.available_phone_numbers('US').local.list(
-                    limit=limit, sms_enabled=True, voice_enabled=True, **search_params
+                available_numbers = subproject_client.available_phone_numbers('US').local.list(
+                    area_code=area_code,
+                    in_locality=locality,
+                    limit=limit
                 )
             
-            formatted_numbers = []
-            for number in numbers:
-                formatted_numbers.append({
-                    'phone_number': number.phone_number,
-                    'formatted_number': number.friendly_name or number.phone_number,
-                    'locality': number.locality,
-                    'region': number.region,
+            # Format results
+            numbers = []
+            for num in available_numbers:
+                numbers.append({
+                    'phone_number': num.phone_number,
+                    'friendly_name': num.friendly_name,
+                    'locality': num.locality,
+                    'region': num.region,
                     'country': country.upper(),
                     'capabilities': {
-                        'sms': True,
-                        'mms': True,
-                        'voice': True
+                        'voice': getattr(num.capabilities, 'voice', True),
+                        'sms': getattr(num.capabilities, 'SMS', True),
+                        'mms': getattr(num.capabilities, 'MMS', True)
                     },
                     'monthly_cost': '$1.00'
                 })
             
-            logger.info(f"Found {len(formatted_numbers)} available numbers")
+            # Create selection token (15 minutes)
+            selection_token = self._create_selection_token(user.signalwire_subproject_sid, numbers)
+            
+            logger.info(f"✅ Found {len(numbers)} numbers for user {user.id}")
             
             return {
                 'success': True,
-                'numbers': formatted_numbers,
-                'count': len(formatted_numbers)
+                'numbers': numbers,
+                'count': len(numbers),
+                'selection_token': selection_token,
+                'expires_in': 900,  # 15 minutes
+                'search_criteria': search_criteria
             }
             
         except Exception as e:
-            logger.error(f"Phone number search failed: {e}")
+            logger.error(f"❌ Number search failed for user {user.id}: {e}")
             return {
                 'success': False,
                 'error': str(e),
@@ -146,399 +149,203 @@ class SignalWireService:
                 'count': 0
             }
 
-    def purchase_number(self, phone_number, subproject_sid=None, friendly_name=None):
-        """Purchase phone number and assign to subproject with webhooks"""
+    # ============================================================================
+    # PHONE NUMBER PURCHASE AND CONFIGURATION
+    # ============================================================================
+    
+    def purchase_and_configure_number(self, user, phone_number: str, selection_token: str) -> Dict[str, Any]:
+        """Purchase number and configure webhooks for user's subproject"""
         try:
-            webhook_base = self._config['webhook_base_url']
+            # Validate selection token
+            if not self._validate_selection_token(selection_token, phone_number):
+                return {
+                    'success': False,
+                    'error': 'Invalid or expired selection token'
+                }
             
-            purchase_params = {
-                'phone_number': phone_number,
-                'friendly_name': friendly_name or 'AssisText Number',
-                'sms_url': f"{webhook_base}/api/webhooks/sms",
-                'sms_method': 'POST',
-                'voice_url': f"{webhook_base}/api/webhooks/voice", 
-                'voice_method': 'POST',
-                'status_callback': f"{webhook_base}/api/webhooks/status",
-                'status_callback_method': 'POST'
-            }
+            # Get subproject client
+            subproject_client = self.get_subproject_client(user)
+            if not subproject_client:
+                return {
+                    'success': False,
+                    'error': 'User subproject not configured'
+                }
             
-            if subproject_sid:
-                purchase_params['subproject_sid'] = subproject_sid
-
-            purchased_number = self.client.incoming_phone_numbers.create(**purchase_params)
+            logger.info(f"Purchasing number {phone_number} for user {user.id}")
             
-            logger.info(f"Successfully purchased {phone_number}")
+            # Purchase phone number with webhook configuration
+            purchased_number = subproject_client.incoming_phone_numbers.create(
+                phone_number=phone_number,
+                friendly_name=f"AssisText-User-{user.id}",
+                # Configure webhooks to point to sync_webhooks endpoints
+                sms_url=f"{self.webhook_base_url}/api/webhooks/sync/sms",
+                sms_method='POST',
+                voice_url=f"{self.webhook_base_url}/api/webhooks/sync/voice",
+                voice_method='POST',
+                status_callback=f"{self.webhook_base_url}/api/webhooks/sync/status",
+                status_callback_method='POST'
+            )
+            
+            logger.info(f"✅ Purchased {phone_number} for user {user.id} (subproject: {user.signalwire_subproject_sid})")
             
             return {
                 'success': True,
                 'phone_number_sid': purchased_number.sid,
                 'phone_number': purchased_number.phone_number,
                 'friendly_name': purchased_number.friendly_name,
+                'capabilities': purchased_number.capabilities,
+                'sms_url': purchased_number.sms_url,
+                'voice_url': purchased_number.voice_url,
                 'webhook_configured': True,
-                'webhooks': {
-                    'sms_url': getattr(purchased_number, 'sms_url', None),
-                    'voice_url': getattr(purchased_number, 'voice_url', None),
-                    'status_callback': getattr(purchased_number, 'status_callback', None)
+                'webhook_endpoints': {
+                    'sms': f"{self.webhook_base_url}/api/webhooks/sms",
+                    'voice': f"{self.webhook_base_url}/api/webhooks/voice",
+                    'status': f"{self.webhook_base_url}/api/webhooks/status"
                 }
             }
             
         except Exception as e:
-            logger.error(f"Phone number purchase failed: {e}")
+            logger.error(f"❌ Number purchase failed for user {user.id}: {e}")
             return {
                 'success': False,
                 'error': str(e)
             }
 
-    def send_sms(self, from_number, to_number, message_body, subproject_sid=None):
-        """Send SMS message"""
-        try:
-            send_params = {
-                'from_': from_number,
-                'to': to_number,
-                'body': message_body,
-                'status_callback': f"{self._config['webhook_base_url']}/api/webhooks/status"
-            }
-            
-            if subproject_sid:
-                subproject_client = SignalWireClient(
-                    subproject_sid,
-                    self._config['auth_token'],
-                    signalwire_space_url=self._config['space_url']
-                )
-                message = subproject_client.messages.create(**send_params)
-            else:
-                message = self.client.messages.create(**send_params)
-            
-            logger.info(f"SMS sent: {message.sid}")
-            
-            return {
-                'success': True,
-                'message_sid': message.sid,
-                'status': message.status,
-                'from_number': message.from_,
-                'to_number': message.to,
-                'body': message.body
-            }
-            
-        except Exception as e:
-            logger.error(f"SMS send failed: {e}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
+    # ============================================================================
+    # PHONE NUMBER SUSPENSION/ACTIVATION
+    # ============================================================================
     
-    def get_message_status(self, message_sid, subproject_sid=None):
-        """Get message delivery status"""
+    def suspend_user_number(self, user) -> Dict[str, Any]:
+        """Suspend user's phone number due to payment issues"""
         try:
-            if subproject_sid:
-                subproject_client = SignalWireClient(
-                    subproject_sid,
-                    self._config['auth_token'],
-                    signalwire_space_url=self._config['space_url']
-                )
-                message = subproject_client.messages(message_sid).fetch()
-            else:
-                message = self.client.messages(message_sid).fetch()
+            if not user.signalwire_phone_number_sid:
+                return {'success': False, 'error': 'No phone number to suspend'}
             
-            return {
-                'success': True,
-                'message_sid': message.sid,
-                'status': message.status,
-                'error_code': getattr(message, 'error_code', None),
-                'error_message': getattr(message, 'error_message', None)
-            }
+            # Get subproject client
+            subproject_client = self.get_subproject_client(user)
+            if not subproject_client:
+                return {'success': False, 'error': 'Cannot access user subproject'}
             
-        except Exception as e:
-            logger.error(f"Message status fetch failed: {e}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
-
-    def validate_webhook_signature(self, url=None, post_data=None, signature=None):
-        """Validate SignalWire webhook signature for security"""
-        try:
-            if not signature:
-                signature = request.headers.get('X-SignalWire-Signature', '')
-            
-            if not url:
-                url = request.url
-            
-            if not post_data:
-                post_data = request.form.to_dict()
-            
-            signature_string = url
-            for key in sorted(post_data.keys()):
-                signature_string += f"{key}{post_data[key]}"
-            
-            expected_signature = base64.b64encode(
-                hmac.new(
-                    self._config['auth_token'].encode('utf-8'),
-                    signature_string.encode('utf-8'),
-                    hashlib.sha1
-                ).digest()
-            ).decode('utf-8')
-            
-            return hmac.compare_digest(signature, expected_signature)
-            
-        except Exception as e:
-            logger.error(f"Webhook validation error: {e}")
-            return False
-
-    def setup_new_tenant(self, user_id, friendly_name, phone_search_criteria):
-        """Complete tenant setup: subproject + phone number + webhooks"""
-        try:
-            logger.info(f"Starting tenant setup for user {user_id}")
-            
-            # Step 1: Create subproject
-            subproject_result = self.create_subproject(user_id, friendly_name)
-            if not subproject_result['success']:
-                return {
-                    'success': False,
-                    'error': f"Subproject creation failed: {subproject_result['error']}"
-                }
-            
-            subproject_sid = subproject_result['subproject_sid']
-            
-            # Step 2: Search for phone numbers
-            search_result = self.search_available_numbers(**phone_search_criteria)
-            if not search_result['success'] or not search_result['numbers']:
-                return {
-                    'success': False,
-                    'error': "No available phone numbers found"
-                }
-            
-            # Step 3: Purchase first available number
-            selected_number = search_result['numbers'][0]['phone_number']
-            purchase_result = self.purchase_number(
-                phone_number=selected_number,
-                subproject_sid=subproject_sid,
-                friendly_name=f"{friendly_name} Number"
-            )
-            
-            if not purchase_result['success']:
-                return {
-                    'success': False,
-                    'error': f"Phone number purchase failed: {purchase_result['error']}"
-                }
-            
-            logger.info(f"Complete tenant setup finished for user {user_id}")
-            
-            return {
-                'success': True,
-                'tenant_setup': {
-                    'user_id': user_id,
-                    'subproject_sid': subproject_sid,
-                    'friendly_name': friendly_name,
-                    'phone_number': purchase_result,
-                    'setup_completed_at': datetime.utcnow().isoformat()
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"Tenant setup failed for user {user_id}: {e}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
-
-    def health_check(self):
-        """Simplified health check"""
-        try:
-            # Test basic connectivity by listing phone numbers
-            phone_numbers = self.client.incoming_phone_numbers.list(limit=1)
-            
-            return {
-                'success': True,
-                'service_status': 'healthy',
-                'phone_numbers_count': len(phone_numbers),
-                'configuration': {
-                    'project_id': self._config['project_id'][:8] + '...',
-                    'space_url': self._config['space_url'],
-                    'webhook_base_url': self._config['webhook_base_url']
-                },
-                'timestamp': datetime.utcnow().isoformat()
-            }
-            
-        except Exception as e:
-            logger.error(f"Health check failed: {e}")
-            return {
-                'success': False,
-                'service_status': 'unhealthy',
-                'error': str(e),
-                'timestamp': datetime.utcnow().isoformat()
-            }
-    def suspend_phone_number(self, phone_number_sid, reason="trial_expired"):
-        """
-        Suspend a phone number by removing webhook URLs
-        This makes the number inactive for receiving/sending SMS
-        """
-        try:
-            # Update the phone number to remove webhook URLs
-            updated_number = self.client.incoming_phone_numbers(phone_number_sid).update(
+            # Update phone number to remove webhooks (effectively suspending)
+            suspended_number = subproject_client.incoming_phone_numbers(user.signalwire_phone_number_sid).update(
                 sms_url='',  # Remove SMS webhook
                 voice_url='',  # Remove voice webhook
                 status_callback='',  # Remove status callback
-                friendly_name=f"SUSPENDED - {reason}"
+                friendly_name= f"AssisText-User-{user.id}-Suspended"
             )
             
-            logger.info(f"✅ Suspended phone number: {updated_number.phone_number} (reason: {reason})")
+            logger.info(f"✅ Suspended number {user.signalwire_phone_number} for user {user.id}")
             
             return {
                 'success': True,
-                'phone_number': updated_number.phone_number,
-                'phone_number_sid': updated_number.sid,
-                'status': 'suspended',
-                'reason': reason,
-                'suspended_at': datetime.utcnow().isoformat()
+                'action': 'suspended',
+                'phone_number': user.signalwire_phone_number,
+                'message': 'Phone number suspended due to payment issues'
             }
             
         except Exception as e:
-            logger.error(f"❌ Failed to suspend phone number {phone_number_sid}: {e}")
+            logger.error(f"❌ Failed to suspend number for user {user.id}: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    def activate_user_number(self, user) -> Dict[str, Any]:
+        """Reactivate user's phone number after payment"""
+        try:
+            if not user.signalwire_phone_number_sid:
+                return {'success': False, 'error': 'No phone number to activate'}
+            
+            # Get subproject client
+            subproject_client = self.get_subproject_client(user)
+            if not subproject_client:
+                return {'success': False, 'error': 'Cannot access user subproject'}
+            
+            # Restore webhooks to reactivate the number
+            activated_number = subproject_client.incoming_phone_numbers(user.signalwire_phone_number_sid).update(
+                sms_url=f"{self.webhook_base_url}/api/webhooks/sync/sms",
+                sms_method='POST',
+                voice_url=f"{self.webhook_base_url}/api/webhooks/sync/voice",
+                voice_method='POST',
+                status_callback=f"{self.webhook_base_url}/api/webhooks/sync/status",
+                status_callback_method='POST',
+                friendly_name= f"AssisText-User-{user.id}-Active"
+            )
+            
+            logger.info(f"✅ Activated number {user.signalwire_phone_number} for user {user.id}")
+            
+            return {
+                'success': True,
+                'action': 'activated',
+                'phone_number': user.signalwire_phone_number,
+                'message': 'Phone number reactivated'
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to activate number for user {user.id}: {e}")
             return {
                 'success': False,
                 'error': str(e)
             }
 
-def reactivate_phone_number(self, phone_number_sid, friendly_name=None):
-    """
-    Reactivate a suspended phone number by restoring webhook URLs
-    Called when user subscribes after trial
-    """
-    try:
-        webhook_base = self._config['webhook_base_url']
-        
-        # Restore webhook URLs
-        updated_number = self.client.incoming_phone_numbers(phone_number_sid).update(
-            sms_url=f"{webhook_base}/api/webhooks/sms",
-            sms_method='POST',
-            voice_url=f"{webhook_base}/api/webhooks/voice",
-            voice_method='POST', 
-            status_callback=f"{webhook_base}/api/webhooks/status",
-            status_callback_method='POST',
-            friendly_name=friendly_name or 'AssisText Number - Active'
-        )
-        
-        logger.info(f"✅ Reactivated phone number: {updated_number.phone_number}")
-        
-        return {
-            'success': True,
-            'phone_number': updated_number.phone_number,
-            'phone_number_sid': updated_number.sid,
-            'status': 'active',
-            'reactivated_at': datetime.utcnow().isoformat(),
-            'webhooks': {
-                'sms_url': updated_number.sms_url,
-                'voice_url': updated_number.voice_url,
-                'status_callback': updated_number.status_callback
-            }
-        }
-    except Exception as e:
-        logger.error(f"❌ Failed to reactivate phone number {phone_number_sid}: {e}")
-        return {
-            'success': False,
-            'error': str(e)
-        }
-
-def transfer_number_ownership(self, phone_number_sid, old_subproject_sid, new_subproject_sid):
-    """
-    Transfer phone number from trial subproject to paid subproject
-    Used when user upgrades from trial
-    """
-    try:
-        # Transfer the phone number to new subproject
-        updated_number = self.client.incoming_phone_numbers(phone_number_sid).update(
-            account_sid=new_subproject_sid
-        )
-        
-        logger.info(f"✅ Transferred number {updated_number.phone_number} from {old_subproject_sid} to {new_subproject_sid}")
-        
-        return {
-            'success': True,
-            'phone_number': updated_number.phone_number,
-            'phone_number_sid': updated_number.sid,
-            'old_subproject': old_subproject_sid,
-            'new_subproject': new_subproject_sid,
-            'transferred_at': datetime.utcnow().isoformat()
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to transfer phone number: {e}")
-        return {
-            'success': False,
-            'error': str(e)
-        }
-
-def get_phone_number_status(self, phone_number_sid):
-    """
-    Get current status of a phone number (active/suspended)
-    """
-    try:
-        phone_number = self.client.incoming_phone_numbers(phone_number_sid).fetch()
-        
-        # Determine if number is active based on webhook URLs
-        is_active = bool(phone_number.sms_url and phone_number.voice_url)
-        
-        return {
-            'success': True,
-            'phone_number': phone_number.phone_number,
-            'phone_number_sid': phone_number.sid,
-            'status': 'active' if is_active else 'suspended',
-            'friendly_name': phone_number.friendly_name,
-            'webhooks': {
-                'sms_url': phone_number.sms_url,
-                'voice_url': phone_number.voice_url,
-                'status_callback': phone_number.status_callback
-            },
-            'subproject_sid': phone_number.subproject_sid,
-            'capabilities': {
-                'sms': getattr(phone_number.capabilities, 'sms', False),
-                'voice': getattr(phone_number.capabilities, 'voice', False)
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to get phone number status: {e}")
-        return {
-            'success': False,
-            'error': str(e)
-        }
-
-# Also add these backward compatibility functions at the bottom of the file:
-
-def suspend_user_phone_number(phone_number_sid, reason="trial_expired"):
-    """Backward compatibility function"""
-    return get_signalwire_service().suspend_phone_number(phone_number_sid, reason)
-
-def reactivate_user_phone_number(phone_number_sid, friendly_name=None):
-    """Backward compatibility function"""
-    return get_signalwire_service().reactivate_phone_number(phone_number_sid, friendly_name)
-
-def get_phone_status(phone_number_sid):
-    """Backward compatibility function"""
-    return get_signalwire_service().get_phone_number_status(phone_number_sid)
-
-# Singleton instance
-_signalwire_service = None
-
-def get_signalwire_service():
-    """Get singleton SignalWire service instance"""
-    global _signalwire_service
+    # ============================================================================
+    # UTILITY FUNCTIONS
+    # ============================================================================
     
-    if _signalwire_service is None:
-        _signalwire_service = SignalWireService()
+    def _create_selection_token(self, subproject_sid: str, numbers: List[Dict]) -> str:
+        """Create secure selection token for number purchase"""
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.utcnow() + timedelta(minutes=15)
+        
+        # Store in Redis or cache (implement based on your caching solution)
+        token_data = {
+            'subproject_sid': subproject_sid,
+            'numbers': numbers,
+            'expires_at': expires_at.isoformat(),
+            'created_at': datetime.utcnow().isoformat()
+        }
+        
+        # TODO: Implement actual token storage
+        cache.set(f"selection_token:{token}", json.dumps(token_data), timeout=900)
+        
+        return token
     
-    return _signalwire_service
-
-# Backward compatibility functions
-def search_phone_numbers(**kwargs):
-    return get_signalwire_service().search_available_numbers(**kwargs)
-
-def purchase_phone_number(phone_number, subproject_sid=None, **kwargs):
-    return get_signalwire_service().purchase_number(phone_number, subproject_sid, **kwargs)
-
-def send_sms(from_number, to_number, message_body, **kwargs):
-    return get_signalwire_service().send_sms(from_number, to_number, message_body, **kwargs)
-
-def validate_webhook_signature(**kwargs):
-    return get_signalwire_service().validate_webhook_signature(**kwargs)
+    def _validate_selection_token(self, token: str, phone_number: str) -> bool:
+        """Validate selection token and check if number is in allowed list"""
+        try:
+            
+            token_data = cache.get(f"selection_token:{token}")
+            if not token_data:
+                return False
+            
+            token_data = json.loads(token_data)
+            return True
+        except Exception:
+            return False
+    
+    def get_user_phone_number_info(self, user) -> Dict[str, Any]:
+        """Get detailed info about user's phone number"""
+        try:
+            if not user.signalwire_phone_number_sid:
+                return {'success': False, 'error': 'No phone number configured'}
+            
+            subproject_client = self.get_subproject_client(user)
+            if not subproject_client:
+                return {'success': False, 'error': 'Cannot access user subproject'}
+            
+            number_info = subproject_client.incoming_phone_numbers(user.signalwire_phone_number_sid).fetch()
+            
+            return {
+                'success': True,
+                'phone_number': number_info.phone_number,
+                'friendly_name': number_info.friendly_name,
+                'sms_url': number_info.sms_url,
+                'voice_url': number_info.voice_url,
+                'status_callback': number_info.status_callback,
+                'is_suspended': not bool(number_info.sms_url),  # Suspended if no SMS URL
+                'capabilities': number_info.capabilities
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get number info for user {user.id}: {e}")
+            return {'success': False, 'error': str(e)}

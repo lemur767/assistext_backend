@@ -32,7 +32,7 @@ class ServiceManager:
     
     @staticmethod
     def get_signalwire_service():
-        """Get SMS service instance."""
+        
         return get_signalwire_service()
     
     @staticmethod
