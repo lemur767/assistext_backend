@@ -5,7 +5,7 @@ No external SignalWire SDK dependency - uses manual HMAC validation
 from flask import Blueprint, request, Response, current_app
 from app.extensions import db
 from app.models.client import Client
-from app.models.message import Message
+from app.models.messaging import Message
 import os
 import logging
 import hmac

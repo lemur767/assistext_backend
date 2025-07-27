@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional
 from celery import current_task
 from celery.exceptions import Retry
 from app.extensions import celery, db
-from app.models.message import Message
+from app.models.messaging import Message
 
 from app.models.client import Client
 from app.services.ai_service import AIService

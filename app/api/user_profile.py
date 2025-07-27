@@ -550,7 +550,7 @@ def get_dashboard_summary():
     
     try:
         from datetime import timedelta
-        from app.models.message import Message
+        from app.models.messaging import Message
         from app.models.client import Client
         
         user = User.query.get(user_id)

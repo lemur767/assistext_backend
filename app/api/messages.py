@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models.user import User
 from app.models.client import Client
-from app.models.message import Message, FlaggedMessage
+from app.models.messaging import Message, FlaggedMessage
 from app.extensions import db
 from datetime import datetime, timedelta
 from sqlalchemy import func, or_, and_
