@@ -2,7 +2,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required
 from app.models import User, db
-from app.services.signalwire_service import SignalWireService
+from app.services import get_signalwire_service
 from datetime import datetime, timedelta
 import logging
 
@@ -62,7 +62,7 @@ def register():
         db.session.flush()  # Get user ID
         
         # Step 1: Create SignalWire subproject
-        signalwire_service = SignalWireService()
+        signalwire_service = get_signalwire_service()
         subproject_result = signalwire_service.create_subproject_for_user(user.id, user.username, user.email)
         
         if not subproject_result['success']:
@@ -143,7 +143,7 @@ def login():
         profile_status = _check_user_profile_status(user)
         
         # Handle SignalWire number suspension/activation based on status
-        signalwire_service = SignalWireService()
+        signalwire_service = get_signalwire_service()
         if user.signalwire_phone_number:
             if profile_status['should_suspend_number']:
                 # Suspend the number
@@ -274,7 +274,7 @@ def search_phone_numbers():
         }
         
         # Use SignalWire service to search numbers
-        signalwire_service = SignalWireService()
+        signalwire_service = get_signalwire_service()
         result = signalwire_service.search_available_numbers(user, search_criteria)
         
         if result['success']:
@@ -327,7 +327,7 @@ def purchase_phone_number():
             }), 400
         
         # Use SignalWire service to purchase number
-        signalwire_service = SignalWireService()
+        signalwire_service = get_signalwire_service()
         result = signalwire_service.purchase_and_configure_number(user, phone_number, selection_token)
         
         if result['success']:
