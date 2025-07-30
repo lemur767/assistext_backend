@@ -11,9 +11,10 @@ from celery.exceptions import Retry
 from app.extensions import celery, db
 from app.models.messaging import Message
 
-from app.models.client import Client
-from app.services.ai_service import AIService
+from app.models.user import User as user
 from app.services.signalwire_service import SignalWireService
+from app.services.billing_service import BillingService
+from app.
 from sqlalchemy.exc import SQLAlchemyError
 import time
 
