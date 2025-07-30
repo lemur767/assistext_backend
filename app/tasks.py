@@ -14,7 +14,7 @@ from app.models.messaging import Message
 from app.models.user import User as user
 from app.services.signalwire_service import SignalWireService
 from app.services.billing_service import BillingService
-from app.
+
 from sqlalchemy.exc import SQLAlchemyError
 import time
 

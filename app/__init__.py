@@ -5,8 +5,9 @@ from flask_jwt_extended import JWTManager
 from app.config import config
 from app.extensions import db, migrate, jwt, mail
 import logging
-from app.services.signalwire_service import SignalWireService
+from app.services.integration_service import IntegrationService 
 from app.services.billing_service import BillingService
+from app.services.messaging_service import MessagingService
 
 
 def create_app(config_name=None):
@@ -87,10 +88,12 @@ def initialize_extensions(app):
 def import_models():
     """Import all models to ensure they're registered with SQLAlchemy"""
     try:
-        from app.models import (
-            User, Message, Client, Subscription, SubscriptionPlan,
-            Invoice, InvoiceItem, PaymentMethod, Payment
-        )
+        from app.models import get_all_models; 
+        print("🔧 Importing models...")
+        
+        # Import all models
+        get_all_models()
+
         print("✅ Models imported successfully")
     except Exception as e:
         print(f"❌ Model imports failed: {e}")

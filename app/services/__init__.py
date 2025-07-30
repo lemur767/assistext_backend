@@ -1,141 +1,186 @@
-
-
-def get_billing_service():
-    """Lazy import billing service to avoid circular imports"""
-    try:
-        from app.services.billing_service import (
-            initialize_stripe,
-            create_subscription,
-            update_subscription,
-            cancel_subscription,
-            check_subscription_status,
-            create_checkout_session
-        )
-        return {
-            'initialize_stripe': initialize_stripe,
-            'create_subscription': create_subscription,
-            'update_subscription': update_subscription,
-            'cancel_subscription': cancel_subscription,
-            'check_subscription_status': check_subscription_status,
-            'create_checkout_session': create_checkout_session
-        }
-    except ImportError:
-        return None
-
-
-def get_signalwire_service():
-    """Get SignalWire service instance (FIXED)"""
-    from app.services.signalwire_service import get_signalwire_service as _get_service
-    return _get_service()
-
-# Service manager for centralized access
-class ServiceManager:
-    """Manager class for all services."""
-    
-    @staticmethod
-    def get_signalwire_service():
-        """Get SignalWire service instance"""
-        return get_signalwire_service()
-    
-    @staticmethod
-    def get_billing_service():
-        """Get billing service functions."""
-        return get_billing_service()
-
-# Export main functions
-__all__ = [
-    'get_signalwire_service',
-    'get_billing_service',
-    'ServiceManager'
-]
 """
-Consolidated Services Package
-Clean 3-layer service architecture
+Clean Services Package for AssisText
+Modern 3-layer service architecture
 
-Services are organized by business domain:
-- BillingService: ALL billing operations (subscriptions, usage, invoices, payments)
-- MessagingService: ALL messaging operations (SMS, AI responses, clients, templates)
-- IntegrationService: ALL external integrations (SignalWire, LLM, Stripe, webhooks)
+Services:
+- BillingService: Billing operations (subscriptions, usage, invoices, payments)
+- MessagingService: Messaging operations (SMS, AI responses, clients, templates)  
+- IntegrationService: External integrations (SignalWire, LLM, Stripe, webhooks)
 """
+
+import logging
+from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
-# IMPORT CONSOLIDATED SERVICES
+# SERVICE IMPORTS
 # =============================================================================
 
 from .billing_service import BillingService
 from .messaging_service import MessagingService
-from .integration_service import IntegrationService
+from .integration_service import (
+    IntegrationService, 
+    get_integration_service as _get_unified_integration_service,
+    send_sms_message,
+    generate_ai_response,
+    create_customer_subscription,
+    process_sms_conversation,
+    check_all_integrations
+)
 
 # =============================================================================
-# SERVICE INSTANCES (Singleton Pattern)
+# SINGLETON INSTANCES
 # =============================================================================
 
-# Create singleton instances for global use
-_billing_service = None
-_messaging_service = None
-_integration_service = None
+_billing_service: Optional[BillingService] = None
+_messaging_service: Optional[MessagingService] = None
+_integration_service: Optional[IntegrationService] = None
 
 def get_billing_service() -> BillingService:
     """Get billing service singleton instance"""
     global _billing_service
+    
     if _billing_service is None:
         _billing_service = BillingService()
+        logger.info("✅ BillingService initialized")
+    
     return _billing_service
 
 def get_messaging_service() -> MessagingService:
     """Get messaging service singleton instance"""
     global _messaging_service
+    
     if _messaging_service is None:
         _messaging_service = MessagingService()
+        logger.info("✅ MessagingService initialized")
+    
     return _messaging_service
 
 def get_integration_service() -> IntegrationService:
-    """Get integration service singleton instance"""
+    """Get unified integration service singleton instance"""
     global _integration_service
+    
     if _integration_service is None:
-        _integration_service = IntegrationService()
+        _integration_service = _get_unified_integration_service()
+        logger.info("✅ Unified IntegrationService initialized")
+    
     return _integration_service
 
 # =============================================================================
-# BACKWARDS COMPATIBILITY HELPERS
+# SERVICE MANAGER
 # =============================================================================
 
-# For gradual migration from old service structure
-def get_legacy_service_mapping():
-    """
-    Mapping of old service functions to new consolidated services
-    Use this during migration to update imports gradually
-    """
-    billing_svc = get_billing_service()
-    messaging_svc = get_messaging_service()
-    integration_svc = get_integration_service()
+class ServiceManager:
+    """Centralized service manager for easy access to all services"""
     
-    return {
-        # Billing operations
-        'create_subscription': billing_svc.create_subscription,
-        'cancel_subscription': billing_svc.cancel_subscription,
-        'track_usage': billing_svc.track_usage,
-        'check_usage_limits': billing_svc.check_usage_limits,
-        'generate_invoice': billing_svc.generate_invoice,
-        'process_payment': billing_svc.process_payment,
+    @staticmethod
+    def get_billing_service() -> BillingService:
+        """Get billing service instance"""
+        return get_billing_service()
+    
+    @staticmethod
+    def get_messaging_service() -> MessagingService:
+        """Get messaging service instance"""
+        return get_messaging_service()
+    
+    @staticmethod
+    def get_integration_service() -> IntegrationService:
+        """Get integration service instance"""
+        return get_integration_service()
+    
+    @staticmethod
+    def get_all_services() -> dict:
+        """Get all service instances as a dictionary"""
+        return {
+            'billing': get_billing_service(),
+            'messaging': get_messaging_service(),
+            'integration': get_integration_service()
+        }
+    
+    @staticmethod
+    def check_services_health() -> dict:
+        """Check health status of all services"""
+        health_status = {}
         
-        # Messaging operations
-        'send_sms': messaging_svc.send_sms,
-        'process_incoming_message': messaging_svc.process_incoming_message,
-        'get_conversation_history': messaging_svc.get_client_conversation,
-        'create_template': messaging_svc.create_template,
-        'send_bulk_sms': messaging_svc.send_bulk_sms,
+        try:
+            billing_svc = get_billing_service()
+            health_status['billing'] = 'healthy'
+        except Exception as e:
+            health_status['billing'] = f'error: {str(e)}'
         
-        # Integration operations
-        'setup_signalwire': integration_svc.setup_signalwire_account,
-        'purchase_phone_number': integration_svc.purchase_phone_number,
-        'setup_stripe_customer': integration_svc.setup_stripe_customer,
-        'add_payment_method': integration_svc.add_payment_method,
-        'test_service_connections': integration_svc.get_all_service_status,
-    }
+        try:
+            messaging_svc = get_messaging_service()
+            health_status['messaging'] = 'healthy'
+        except Exception as e:
+            health_status['messaging'] = f'error: {str(e)}'
+        
+        try:
+            integration_svc = get_integration_service()
+            # Use the integration service's built-in health check
+            integration_health = integration_svc.get_all_service_status()
+            health_status['integration'] = integration_health['overall_status']
+        except Exception as e:
+            health_status['integration'] = f'error: {str(e)}'
+        
+        health_status['overall'] = 'healthy' if all(
+            'healthy' in str(status) for status in health_status.values()
+        ) else 'degraded'
+        
+        return health_status
 
 # =============================================================================
-# EXPORT SERVICES AND FUNCTIONS
+# INITIALIZATION HELPERS
+# =============================================================================
+
+def initialize_all_services() -> dict:
+    """Initialize all services and return status"""
+    results = {}
+    
+    try:
+        billing_svc = get_billing_service()
+        results['billing'] = 'initialized'
+    except Exception as e:
+        results['billing'] = f'error: {str(e)}'
+    
+    try:
+        messaging_svc = get_messaging_service()
+        results['messaging'] = 'initialized'
+    except Exception as e:
+        results['messaging'] = f'error: {str(e)}'
+    
+    try:
+        integration_svc = get_integration_service()
+        results['integration'] = 'initialized'
+    except Exception as e:
+        results['integration'] = f'error: {str(e)}'
+    
+    # Log results
+    success_count = sum(1 for status in results.values() if status == 'initialized')
+    total_count = len(results)
+    
+    if success_count == total_count:
+        logger.info(f"✅ All {total_count} services initialized successfully")
+    else:
+        logger.warning(f"⚠️ Only {success_count}/{total_count} services initialized successfully")
+        for service, status in results.items():
+            if status != 'initialized':
+                logger.error(f"❌ {service} service: {status}")
+    
+    return results
+
+def reset_service_instances():
+    """Reset all service instances (useful for testing)"""
+    global _billing_service, _messaging_service, _integration_service
+    
+    _billing_service = None
+    _messaging_service = None
+    _integration_service = None
+    
+    logger.info("🔄 All service instances reset")
+
+# =============================================================================
+# EXPORTS
 # =============================================================================
 
 __all__ = [
@@ -144,70 +189,29 @@ __all__ = [
     'MessagingService', 
     'IntegrationService',
     
-    # Service getters
+    # Service getters (primary interface)
     'get_billing_service',
     'get_messaging_service',
     'get_integration_service',
     
-    # Backwards compatibility
-    'get_legacy_service_mapping'
+    # Service manager
+    'ServiceManager',
+    
+    # Initialization helpers
+    'initialize_all_services',
+    'reset_service_instances',
+    
+    # Integration service convenience functions
+    'send_sms_message',
+    'generate_ai_response', 
+    'create_customer_subscription',
+    'process_sms_conversation',
+    'check_all_integrations'
 ]
 
 # =============================================================================
-# SERVICE HEALTH CHECK
+# PACKAGE INITIALIZATION
 # =============================================================================
 
-def check_all_services_health():
-    """Check health of all services"""
-    try:
-        billing_svc = get_billing_service()
-        messaging_svc = get_messaging_service()
-        integration_svc = get_integration_service()
-        
-        return {
-            'billing_service': 'healthy',
-            'messaging_service': 'healthy', 
-            'integration_service': 'healthy',
-            'all_services_loaded': True
-        }
-    except Exception as e:
-        return {
-            'error': str(e),
-            'all_services_loaded': False
-        }
-
-# =============================================================================
-# MIGRATION HELPERS
-# =============================================================================
-
-def migrate_from_old_services():
-    """
-    Helper function to assist with migration from old service structure
-    Returns mapping of old imports to new service methods
-    """
-    return {
-        'OLD_IMPORTS_TO_REPLACE': {
-            'from app.services.billing_service import create_subscription': 
-                'from app.services import get_billing_service; billing_svc = get_billing_service(); billing_svc.create_subscription',
-            
-            'from app.services.sms_service import send_sms':
-                'from app.services import get_messaging_service; messaging_svc = get_messaging_service(); messaging_svc.send_sms',
-            
-            'from app.services.ai_service import generate_ai_response':
-                'from app.services import get_messaging_service; messaging_svc = get_messaging_service(); messaging_svc._generate_and_send_ai_response',
-            
-            'from app.services.subscription_service import SubscriptionService':
-                'from app.services import get_billing_service; billing_svc = get_billing_service()',
-        },
-        
-        'FUNCTION_MAPPINGS': {
-            'billing_service.create_subscription': 'billing_service.create_subscription',
-            'subscription_service.create_subscription': 'billing_service.create_subscription',
-            'usage_tracker.track_usage': 'billing_service.track_usage',
-            'invoice_generator.generate_invoice': 'billing_service.generate_invoice',
-            'sms_service.send_sms': 'messaging_service.send_sms',
-            'message_handler.process_incoming_message': 'messaging_service.process_incoming_message',
-            'ai_service.generate_response': 'messaging_service._generate_and_send_ai_response',
-        }
-    }
-
+logger.info("📦 Clean services package loaded - no legacy code!")
+logger.info("✅ Modern service architecture ready")

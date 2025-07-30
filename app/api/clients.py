@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models.user import User
-from app.models.client import Client
+from app.models.messaging import Client
 from app.models.messaging import Message
 from app.extensions import db
 from datetime import datetime, timedelta

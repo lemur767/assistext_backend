@@ -1,8 +1,8 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models.user import User
-from app.models.client import Client
-from app.models.messaging import Message, FlaggedMessage
+from app.services.integration_service import IntegrationService
+from app.models.messaging import Message, Client
 from app.extensions import db
 from datetime import datetime, timedelta
 from sqlalchemy import func, or_, and_
@@ -358,15 +358,21 @@ def send_message():
         
         # Send via SignalWire (implement this based on your SignalWire setup)
         try:
-            # TODO: Implement actual SignalWire sending
-            # from app.services.sms_service import send_sms
-            # signalwire_message = send_sms(
-            #     from_number=user.signalwire_phone_number,
-            #     to_number=to_number,
-            #     body=message_body,
-            #     user=user
-            # )
-            # message.message_sid = signalwire_message.sid
+            user = User.query.get(user_id)
+            if not user or not user.signalwire_phone_number:
+                return jsonify({'error': 'User or SignalWire phone number not found'}), 404
+            signalwire_message = user.send_signalwire_message(to_number, message_body)
+            if not signalwire_message:
+                return jsonify({'error': 'Failed to send message via SignalWire'}), 500
+            
+            signalwire = IntegrationService.get_signalwire_service()
+            message = signalwire.send_sms (
+                from_number = user.signalwire_phone_number,
+                to_number = to_number,
+                body=message_body,
+                user=user,
+                )
+            message.message_sid = signalwire_message.sid
             message.status = 'sent'  # Temporary - would be set by actual response
             
             # Update user message count

@@ -2,12 +2,14 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required
 from app.models import User, db
-from app.services import get_signalwire_service
+from app.services import integration_service
 from datetime import datetime, timedelta
 import logging
 
 auth_bp = Blueprint('auth', __name__)
 logger = logging.getLogger(__name__)
+
+signalwire_service = integration_service.get_signalwire_service()
 
 @auth_bp.route('/register', methods=['POST', 'OPTIONS'])
 def register():
@@ -62,7 +64,7 @@ def register():
         db.session.flush()  # Get user ID
         
         # Step 1: Create SignalWire subproject
-        signalwire_service = get_signalwire_service()
+        logger.info(f"Creating SignalWire subproject for user {user.id}")
         subproject_result = signalwire_service.create_subproject_for_user(user.id, user.username, user.email)
         
         if not subproject_result['success']:
@@ -143,7 +145,7 @@ def login():
         profile_status = _check_user_profile_status(user)
         
         # Handle SignalWire number suspension/activation based on status
-        signalwire_service = get_signalwire_service()
+        
         if user.signalwire_phone_number:
             if profile_status['should_suspend_number']:
                 # Suspend the number
@@ -235,6 +237,7 @@ def get_current_user():
 def logout():
     """Logout user"""
     try:
+        user_id = get_jwt_identity
         # You can add logout logic here if needed (blacklist tokens, etc.)
         # For now, just return success - frontend will clear tokens
         
@@ -274,7 +277,7 @@ def search_phone_numbers():
         }
         
         # Use SignalWire service to search numbers
-        signalwire_service = get_signalwire_service()
+        
         result = signalwire_service.search_available_numbers(user, search_criteria)
         
         if result['success']:
@@ -327,7 +330,13 @@ def purchase_phone_number():
             }), 400
         
         # Use SignalWire service to purchase number
-        signalwire_service = get_signalwire_service()
+        logger.info(f"Purchasing phone number {phone_number} for user {user.id}")
+        if not signalwire_service:
+            return jsonify({
+                'success': False,
+                'error': 'SignalWire service not available'
+            }), 500
+            
         result = signalwire_service.purchase_and_configure_number(user, phone_number, selection_token)
         
         if result['success']:
@@ -365,11 +374,24 @@ def _check_user_profile_status(user):
     """Check user subscription/trial status and determine actions needed"""
     try:
         current_time = datetime.utcnow()
-        
-        # Check if user has an active subscription
-        # TODO: Replace with actual subscription checking logic
-        has_active_subscription = False  # user.subscription and user.subscription.status == 'active'
-        has_outstanding_balance = False  # user.outstanding_balance > 0
+        user = User.query.get(user.id)
+        if not user and not user.is_active:
+            return {
+                'status': 'error',
+                'should_suspend_number': True,
+                'should_activate_number': False,
+                'requires_payment': True,
+                'banner_message': 'NUMBER SUSPENDED - USER NOT FOUND'
+            }   
+        elif not user.subscription.status and not user.trial_active:
+            return {
+                'status': 'inactive',
+                'should_suspend_number': True,
+                'should_activate_number': False,
+                'requires_payment': True,
+                'banner_message': 'NUMBER SUSPENDED - NO SUBSCRIPTION'
+            }
+            
         
         # Check trial status
         trial_expired = False
@@ -377,7 +399,7 @@ def _check_user_profile_status(user):
             trial_expired = current_time > user.trial_phone_expires_at
         
         # Determine status and actions
-        if has_active_subscription:
+        if user.has_active_subscription:
             return {
                 'status': 'active_subscription',
                 'should_suspend_number': False,
@@ -393,7 +415,7 @@ def _check_user_profile_status(user):
                 'requires_payment': False,
                 'banner_message': f"Trial expires {user.trial_phone_expires_at.strftime('%Y-%m-%d')}"
             }
-        elif has_outstanding_balance:
+        elif user.has_outstanding_balance:
             return {
                 'status': 'outstanding_balance',
                 'should_suspend_number': True,
