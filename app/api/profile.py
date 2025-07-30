@@ -291,7 +291,7 @@ def get_usage_stats():
         user.reset_monthly_count_if_needed()
         
         # Get additional stats
-        from app.models.message import Message
+        from app.models.messaging import Message
         from app.models.client import Client
         
         # Count messages for today

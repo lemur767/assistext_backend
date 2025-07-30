@@ -30,6 +30,7 @@ def register_blueprints(app):
         ('app.api.user_profile', 'user_profile_bp', '/api/user/profile', False),
         ('app.api.clients', 'clients_bp', '/api/clients', False),
         ('app.api.messages', 'messages_bp', '/api/messages', False),
+        ('app.api.analytics', 'analytics_bp', '/api/analytics', False), 
     ]
     
     # Register all blueprints

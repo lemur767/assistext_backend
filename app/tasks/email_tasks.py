@@ -376,7 +376,7 @@ def _get_trial_usage_stats(user_id):
             return {}
         
         # Calculate trial usage (you'll need to implement based on your models)
-        from app.models.message import Message
+        from app.models.messaging import Message
         from app.models.client import Client
         
         message_count = Message.query.filter_by(user_id=user_id).count()

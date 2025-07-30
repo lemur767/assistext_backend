@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify
 from app.extensions import db
 from app.models.user import User
 from app.models.profile import Profile
-from app.models.message import Message
+from app.models.messaging import Message
 from datetime import datetime
 import logging
 
