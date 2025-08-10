@@ -22,7 +22,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 # SignalWire imports
 from signalwire.rest import Client as SignalWireClient
-from signalwire.rest.api.laml.v1 import RequestValidator
+
 
 # Database imports
 from app.extensions import db
@@ -82,7 +82,7 @@ class IntegrationService:
             )
             
             # Initialize webhook validator
-            self.signalwire_validator = RequestValidator(self.signalwire_auth_token)
+           
             
             # Test connection
             if self._test_signalwire_connection():

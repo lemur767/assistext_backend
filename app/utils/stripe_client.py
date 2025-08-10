@@ -248,4 +248,3 @@ class StripeClient:
 
 
 # Backward compatibility alias
-StripeSubscriptionClient = StripeClient

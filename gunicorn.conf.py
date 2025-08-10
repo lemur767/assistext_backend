@@ -1,5 +1,5 @@
 bind = "127.0.0.1:5000"
-workers = 3
+workers = 2
 worker_class = "sync"
 timeout = 120
 keepalive = 5
@@ -7,3 +7,5 @@ max_requests = 1000
 max_requests_jitter = 100
 user = "admin"
 group = "admin"
+chdir = "/opt/assistext_backend"
+pythonpath = "/opt/assistext_backend"

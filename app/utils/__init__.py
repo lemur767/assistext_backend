@@ -6,7 +6,7 @@ Contains helper functions for external services
 
 # Import SignalWire helpers
 try:
-    from .signalwire_helpers import (
+    from app.services.signalwire_service import (
         get_signalwire_client,
         send_sms,
         validate_signalwire_request,
@@ -37,6 +37,20 @@ try:
 except ImportError as e:
     OLLAMA_AVAILABLE = False
     print(f"Warning: Ollama helpers not available: {e}")
+
+# Import Stripe client
+try:
+    from .stripe_client import (
+        StripeClient,
+        StripeSubscriptionError,
+        StripeWebhookError,
+        handle_stripe_errors
+    )
+    
+    STRIPE_AVAILABLE = True
+except ImportError as e:
+    STRIPE_AVAILABLE = False
+    print(f"Warning: Stripe client not available: {e}")
 
 # Security helpers (if they exist)
 try:
@@ -72,6 +86,16 @@ if OLLAMA_AVAILABLE:
         'OllamaClient'
     ])
 
+# Add Stripe exports
+if STRIPE_AVAILABLE:
+    __all__.extend([
+        'StripeClient',
+        'StripeSubscriptionClient',
+        'StripeSubscriptionError',
+        'StripeWebhookError',
+        'handle_stripe_errors'
+    ])
+
 # Convenience functions that work regardless of backend
 def send_message(from_number, to_number, body):
     """
@@ -91,46 +115,11 @@ def generate_text_response(prompt, system_prompt=None, **kwargs):
     else:
         raise RuntimeError("No LLM service available")
 
-def get_service_status():
+def get_stripe_client():
     """
-    Get status of all available services
+    Get Stripe client if available
     """
-    status = {
-        'signalwire': SIGNALWIRE_AVAILABLE,
-        'ollama': OLLAMA_AVAILABLE,
-        'security': SECURITY_AVAILABLE
-    }
-    
-    # Test actual connectivity if services are available
-    if SIGNALWIRE_AVAILABLE:
-        try:
-            client = get_signalwire_client()
-            # Try a simple operation to test connectivity
-            status['signalwire_connected'] = True
-        except Exception:
-            status['signalwire_connected'] = False
-    
-    if OLLAMA_AVAILABLE:
-        try:
-            status['ollama_connected'] = is_llm_available()
-            if status['ollama_connected']:
-                health = get_llm_health()
-                status['ollama_health'] = health
-        except Exception:
-            status['ollama_connected'] = False
-    
-    return status
-
-# Add convenience functions to exports
-__all__.extend([
-    'send_message',
-    'generate_text_response', 
-    'get_service_status'
-])
-
-# Service availability flags
-__all__.extend([
-    'SIGNALWIRE_AVAILABLE',
-    'OLLAMA_AVAILABLE', 
-    'SECURITY_AVAILABLE'
-])
+    if STRIPE_AVAILABLE:
+        return StripeClient()
+    else:
+        raise RuntimeError("Stripe client not available")
