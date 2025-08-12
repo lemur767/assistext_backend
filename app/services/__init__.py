@@ -1,217 +1,156 @@
+# app/services/__init__.py - Fixed Service Architecture
 """
-Clean Services Package for AssisText
-Modern 3-layer service architecture
-
-Services:
-- BillingService: Billing operations (subscriptions, usage, invoices, payments)
-- MessagingService: Messaging operations (SMS, AI responses, clients, templates)  
-- IntegrationService: External integrations (SignalWire, LLM, Stripe, webhooks)
+Service Layer - Centralized service management with dependency injection
 """
-
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
-# =============================================================================
-# SERVICE IMPORTS
-# =============================================================================
-
-from .billing_service import BillingService
-from .messaging_service import MessagingService
-from .integration_service import (
-    IntegrationService, 
-    get_integration_service as _get_unified_integration_service,
-    send_sms_message,
-    generate_ai_response,
-    create_customer_subscription,
-    process_sms_conversation,
-    check_all_integrations
-)
-
-# =============================================================================
-# SINGLETON INSTANCES
-# =============================================================================
-
-_billing_service: Optional[BillingService] = None
-_messaging_service: Optional[MessagingService] = None
-_integration_service: Optional[IntegrationService] = None
-
-def get_billing_service() -> BillingService:
-    """Get billing service singleton instance"""
-    global _billing_service
-    
-    if _billing_service is None:
-        _billing_service = BillingService()
-        logger.info("✅ BillingService initialized")
-    
-    return _billing_service
-
-def get_messaging_service() -> MessagingService:
-    """Get messaging service singleton instance"""
-    global _messaging_service
-    
-    if _messaging_service is None:
-        _messaging_service = MessagingService()
-        logger.info("✅ MessagingService initialized")
-    
-    return _messaging_service
-
-def get_integration_service() -> IntegrationService:
-    """Get unified integration service singleton instance"""
-    global _integration_service
-    
-    if _integration_service is None:
-        _integration_service = _get_unified_integration_service()
-        logger.info("✅ Unified IntegrationService initialized")
-    
-    return _integration_service
-
-# =============================================================================
-# SERVICE MANAGER
-# =============================================================================
+# Service registry to prevent circular imports
+_service_registry: Dict[str, Any] = {}
 
 class ServiceManager:
-    """Centralized service manager for easy access to all services"""
+    """Centralized service management"""
     
-    @staticmethod
-    def get_billing_service() -> BillingService:
-        """Get billing service instance"""
-        return get_billing_service()
+    def __init__(self):
+        self._services = {}
+        self._initialized = False
     
-    @staticmethod
-    def get_messaging_service() -> MessagingService:
-        """Get messaging service instance"""
-        return get_messaging_service()
-    
-    @staticmethod
-    def get_integration_service() -> IntegrationService:
-        """Get integration service instance"""
-        return get_integration_service()
-    
-    @staticmethod
-    def get_all_services() -> dict:
-        """Get all service instances as a dictionary"""
-        return {
-            'billing': get_billing_service(),
-            'messaging': get_messaging_service(),
-            'integration': get_integration_service()
+    def register_service(self, name: str, service_class, *args, **kwargs):
+        """Register a service class"""
+        self._services[name] = {
+            'class': service_class,
+            'args': args,
+            'kwargs': kwargs,
+            'instance': None
         }
     
-    @staticmethod
-    def check_services_health() -> dict:
-        """Check health status of all services"""
-        health_status = {}
+    def get_service(self, name: str):
+        """Get service instance (lazy loading)"""
+        if name not in self._services:
+            raise ValueError(f"Service '{name}' not registered")
         
-        try:
-            billing_svc = get_billing_service()
-            health_status['billing'] = 'healthy'
-        except Exception as e:
-            health_status['billing'] = f'error: {str(e)}'
+        service_config = self._services[name]
+        if service_config['instance'] is None:
+            try:
+                service_config['instance'] = service_config['class'](
+                    *service_config['args'],
+                    **service_config['kwargs']
+                )
+                logger.info(f"✅ Service '{name}' initialized")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize service '{name}': {e}")
+                raise
         
-        try:
-            messaging_svc = get_messaging_service()
-            health_status['messaging'] = 'healthy'
-        except Exception as e:
-            health_status['messaging'] = f'error: {str(e)}'
-        
-        try:
-            integration_svc = get_integration_service()
-            # Use the integration service's built-in health check
-            integration_health = integration_svc.get_all_service_status()
-            health_status['integration'] = integration_health['overall_status']
-        except Exception as e:
-            health_status['integration'] = f'error: {str(e)}'
-        
-        health_status['overall'] = 'healthy' if all(
-            'healthy' in str(status) for status in health_status.values()
-        ) else 'degraded'
-        
-        return health_status
-
-# =============================================================================
-# INITIALIZATION HELPERS
-# =============================================================================
-
-def initialize_all_services() -> dict:
-    """Initialize all services and return status"""
-    results = {}
+        return service_config['instance']
     
+    def initialize_all(self):
+        """Initialize all registered services"""
+        for name in self._services:
+            try:
+                self.get_service(name)
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize service '{name}': {e}")
+        self._initialized = True
+
+# Global service manager
+service_manager = ServiceManager()
+
+def register_all_services():
+    """Register all application services"""
     try:
-        billing_svc = get_billing_service()
-        results['billing'] = 'initialized'
-    except Exception as e:
-        results['billing'] = f'error: {str(e)}'
-    
+        # Import service classes (lazy to avoid circular imports)
+        from app.services.auth_service import AuthService
+        from app.services.user_service import UserService
+        from app.services.billing_service import BillingService
+        from app.services.signalwire_service import SignalWireService
+        from app.services.llm_service import LLMService
+        from app.services.message_service import MessageService
+        from app.services.notification_service import NotificationService
+        from app.services.analytics_service import AnalyticsService
+        
+        # Register services
+        service_manager.register_service('auth', AuthService)
+        service_manager.register_service('user', UserService)
+        service_manager.register_service('billing', BillingService)
+        service_manager.register_service('signalwire', SignalWireService)
+        service_manager.register_service('llm', LLMService)
+        service_manager.register_service('message', MessageService)
+        service_manager.register_service('notification', NotificationService)
+        service_manager.register_service('analytics', AnalyticsService)
+        
+        logger.info("✅ All services registered")
+        
+    except ImportError as e:
+        logger.error(f"❌ Service registration failed: {e}")
+        raise
+
+# Service getter functions (public API)
+@lru_cache(maxsize=None)
+def get_auth_service():
+    """Get authentication service"""
+    return service_manager.get_service('auth')
+
+@lru_cache(maxsize=None)
+def get_user_service():
+    """Get user management service"""
+    return service_manager.get_service('user')
+
+@lru_cache(maxsize=None)
+def get_billing_service():
+    """Get billing service"""
+    return service_manager.get_service('billing')
+
+@lru_cache(maxsize=None)
+def get_signalwire_service():
+    """Get SignalWire service"""
+    return service_manager.get_service('signalwire')
+
+@lru_cache(maxsize=None)
+def get_llm_service():
+    """Get LLM service"""
+    return service_manager.get_service('llm')
+
+@lru_cache(maxsize=None)
+def get_message_service():
+    """Get message service"""
+    return service_manager.get_service('message')
+
+@lru_cache(maxsize=None)
+def get_notification_service():
+    """Get notification service"""
+    return service_manager.get_service('notification')
+
+@lru_cache(maxsize=None)
+def get_analytics_service():
+    """Get analytics service"""
+    return service_manager.get_service('analytics')
+
+# Initialization function
+def initialize_services(app=None):
+    """Initialize all services with Flask app context"""
     try:
-        messaging_svc = get_messaging_service()
-        results['messaging'] = 'initialized'
+        register_all_services()
+        if app:
+            with app.app_context():
+                service_manager.initialize_all()
+        logger.info("✅ Service layer initialized successfully")
     except Exception as e:
-        results['messaging'] = f'error: {str(e)}'
-    
-    try:
-        integration_svc = get_integration_service()
-        results['integration'] = 'initialized'
-    except Exception as e:
-        results['integration'] = f'error: {str(e)}'
-    
-    # Log results
-    success_count = sum(1 for status in results.values() if status == 'initialized')
-    total_count = len(results)
-    
-    if success_count == total_count:
-        logger.info(f"✅ All {total_count} services initialized successfully")
-    else:
-        logger.warning(f"⚠️ Only {success_count}/{total_count} services initialized successfully")
-        for service, status in results.items():
-            if status != 'initialized':
-                logger.error(f"❌ {service} service: {status}")
-    
-    return results
+        logger.error(f"❌ Service initialization failed: {e}")
+        raise
 
-def reset_service_instances():
-    """Reset all service instances (useful for testing)"""
-    global _billing_service, _messaging_service, _integration_service
-    
-    _billing_service = None
-    _messaging_service = None
-    _integration_service = None
-    
-    logger.info("🔄 All service instances reset")
-
-# =============================================================================
-# EXPORTS
-# =============================================================================
-
+# Export the public API
 __all__ = [
-    # Service classes
-    'BillingService',
-    'MessagingService', 
-    'IntegrationService',
-    
-    # Service getters (primary interface)
+    'get_auth_service',
+    'get_user_service', 
     'get_billing_service',
-    'get_messaging_service',
-    'get_integration_service',
-    
-    # Service manager
-    'ServiceManager',
-    
-    # Initialization helpers
-    'initialize_all_services',
-    'reset_service_instances',
-    
-    # Integration service convenience functions
-    'send_sms_message',
-    'generate_ai_response', 
-    'create_customer_subscription',
-    'process_sms_conversation',
-    'check_all_integrations'
+    'get_signalwire_service',
+    'get_llm_service',
+    'get_message_service',
+    'get_notification_service',
+    'get_analytics_service',
+    'initialize_services',
+    'service_manager'
 ]
-
-# =============================================================================
-# PACKAGE INITIALIZATION
-# =============================================================================
-
-logger.info("📦 Clean services package loaded - no legacy code!")
-logger.info("✅ Modern service architecture ready")
