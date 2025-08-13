@@ -1,33 +1,43 @@
-
+# app/extensions.py - Fixed Flask Extensions
+"""
+Flask Extensions - Centralized extension initialization
+"""
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
-from flask_socketio import SocketIO
-from celery import Celery
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_mail import Mail
+import redis
 
-# Initialize extensions without configuration
-# These will be configured in the create_app function
+# Initialize extensions without app context
 db = SQLAlchemy()
 migrate = Migrate()
 jwt = JWTManager()
-socketio = SocketIO()
 mail = Mail()
-def init_extensions(app):
-    """Initialize all extensions with app"""
-    db.init_app(app)
-    migrate.init_app(app, db)
-    jwt.init_app(app)
-    mail.init_app(app)
-    socketio.init_app(app)
-    return {
-        'db': db,
-        'migrate': migrate, 
-        'jwt': jwt,
-        'mail': mail
-    }
-# Celery will be configured later in create_app
-celery = Celery(__name__)
 
-# Remove task_queue initialization from here
-# It should be handled in the app factory function
+# Rate limiter with Redis backend
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour", "10 per minute"]
+)
+
+# Redis client for caching and sessions
+redis_client = None
+
+def init_redis(app):
+    """Initialize Redis client"""
+    global redis_client
+    try:
+        redis_url = app.config.get('REDIS_URL', 'redis://localhost:6379')
+        redis_client = redis.from_url(redis_url, decode_responses=True)
+        redis_client.ping()  # Test connection
+        app.logger.info("✅ Redis connection established")
+        return redis_client
+    except Exception as e:
+        app.logger.error(f"❌ Redis connection failed: {e}")
+        return None
+
+def get_redis():
+    """Get Redis client instance"""
+    return redis_client
