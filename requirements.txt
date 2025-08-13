@@ -16,6 +16,7 @@ SQLAlchemy>=2.0.23,<3.0.0
 # Third-party APIs
 signalwire
 twilio>=8.10.0
+stripe
 
 # Task Queue
 celery>=5.3.4,<6.0.0
