@@ -1,84 +1,96 @@
-# app/utils/validators.py
-from typing import Dict, Any, Optional, List, Union
 import re
-from datetime import datetime
+from functools import wraps
+from flask import request, jsonify
+from marshmallow import ValidationError
 
-def validate_json_data(data: Dict[str, Any], schema: Dict[str, Dict[str, Any]]) -> Optional[str]:
-    """
-    Validate JSON data against a simple schema
-    
-    Args:
-        data: The data to validate
-        schema: Schema definition with field requirements
-        
-    Returns:
-        Error message if validation fails, None if successful
-    """
-    for field, rules in schema.items():
-        value = data.get(field)
-        
-        # Check required fields
-        if rules.get('required', False) and (value is None or value == ''):
-            return f"Field '{field}' is required"
-        
-        # Skip validation for optional empty fields
-        if value is None or value == '':
-            continue
-        
-        # Type validation
-        expected_type = rules.get('type')
-        if expected_type:
-            if expected_type == 'string' and not isinstance(value, str):
-                return f"Field '{field}' must be a string"
-            elif expected_type == 'integer' and not isinstance(value, int):
-                return f"Field '{field}' must be an integer"
-            elif expected_type == 'float' and not isinstance(value, (int, float)):
-                return f"Field '{field}' must be a number"
-            elif expected_type == 'boolean' and not isinstance(value, bool):
-                return f"Field '{field}' must be a boolean"
-            elif expected_type == 'list' and not isinstance(value, list):
-                return f"Field '{field}' must be a list"
-        
-        # String length validation
-        if isinstance(value, str):
-            min_length = rules.get('min_length')
-            max_length = rules.get('max_length')
-            
-            if min_length and len(value) < min_length:
-                return f"Field '{field}' must be at least {min_length} characters"
-            if max_length and len(value) > max_length:
-                return f"Field '{field}' must be no more than {max_length} characters"
-        
-        # Numeric range validation
-        if isinstance(value, (int, float)):
-            min_val = rules.get('min')
-            max_val = rules.get('max')
-            
-            if min_val is not None and value < min_val:
-                return f"Field '{field}' must be at least {min_val}"
-            if max_val is not None and value > max_val:
-                return f"Field '{field}' must be no more than {max_val}"
-        
-        # Enum validation
-        allowed_values = rules.get('allowed')
-        if allowed_values and value not in allowed_values:
-            return f"Field '{field}' must be one of: {', '.join(map(str, allowed_values))}"
-        
-        # Pattern validation
-        pattern = rules.get('pattern')
-        if pattern and isinstance(value, str):
-            if not re.match(pattern, value):
-                return f"Field '{field}' format is invalid"
-    
-    return None
-
-def validate_phone_number(phone_number: str) -> bool:
-    """Validate phone number format"""
-    # Basic phone number validation for North American numbers
-    pattern = r'^\+1[2-9]\d{2}[2-9]\d{2}\d{4}$'
-    return bool(re.match(pattern, phone_number))
-
-def validate_email(email: str) -> bool:
+def validate_email(email):
     """Validate email format"""
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return bool(re.match(pattern, email))
+    return re.match(pattern, email) is not None
+
+def validate_phone_number(phone):
+    """Validate phone number format"""
+    # Remove all non-digit characters
+    digits_only = re.sub(r'[^\d]', '', phone)
+    
+    # Check if it's a valid North American number
+    if len(digits_only) == 10:
+        return True
+    elif len(digits_only) == 11 and digits_only.startswith('1'):
+        return True
+    elif phone.startswith('+1') and len(digits_only) == 11:
+        return True
+    
+    return False
+
+def normalize_phone_number(phone):
+    """Normalize phone number to E.164 format"""
+    if not phone:
+        return None
+    
+    # Remove all non-digit characters
+    digits_only = re.sub(r'[^\d]', '', phone)
+    
+    # Add country code if missing
+    if len(digits_only) == 10:
+        return f'+1{digits_only}'
+    elif len(digits_only) == 11 and digits_only.startswith('1'):
+        return f'+{digits_only}'
+    elif phone.startswith('+'):
+        return phone
+    
+    return phone
+
+def sanitize_string(text, max_length=None):
+    """Sanitize text input"""
+    if not text:
+        return None
+    
+    # Strip whitespace
+    text = text.strip()
+    
+    # Remove null bytes
+    text = text.replace('\x00', '')
+    
+    # Truncate if necessary
+    if max_length and len(text) > max_length:
+        text = text[:max_length]
+    
+    return text
+
+def validate_request_json(schema):
+    """Decorator to validate JSON request data"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            try:
+                if not request.is_json:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Content-Type must be application/json'
+                    }), 400
+                
+                json_data = request.get_json()
+                if json_data is None:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Invalid JSON'
+                    }), 400
+                
+                # Validate with schema
+                validated_data = schema.load(json_data)
+                
+                # Replace request data with validated data
+                request.validated_data = validated_data
+                
+                return f(*args, **kwargs)
+                
+            except ValidationError as e:
+                return jsonify({
+                    'success': False,
+                    'error': 'Validation failed',
+                    'errors': e.messages
+                }), 400
+                
+        return decorated_function
+    return decorator

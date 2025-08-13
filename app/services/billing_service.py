@@ -1,539 +1,733 @@
-
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Tuple
-from decimal import Decimal
+import os
 import logging
+import stripe
+from datetime import datetime, timedelta
+from decimal import Decimal
+from typing import Dict, Any, List, Optional
 
 from flask import current_app
-from sqlalchemy import and_, or_, func
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.models.billing import (
-    Subscription, SubscriptionPlan, Invoice, InvoiceItem,
-    PaymentMethod, Payment, UsageRecord
+from app.models import (
+    User, Subscription, SubscriptionPlan, PaymentMethod, 
+    Invoice, UsageRecord
 )
-from app.models.user import User
-from app.utils.stripe_client import StripeClient
+
+
+class StripeConfig:
+    """Stripe configuration management"""
+    
+    def __init__(self):
+        self.secret_key = os.getenv('STRIPE_SECRET_KEY')
+        self.public_key = os.getenv('STRIPE_PUBLIC_KEY')
+        self.webhook_secret = os.getenv('STRIPE_WEBHOOK_SECRET')
+        
+        if not self.secret_key:
+            raise ValueError("Missing STRIPE_SECRET_KEY environment variable")
+        
+        stripe.api_key = self.secret_key
 
 
 class BillingService:
-    """Unified billing operations service"""
+    """
+    Complete billing service with Stripe integration
+    Handles subscriptions, payments, and usage tracking
+    """
     
     def __init__(self):
+        self.config = StripeConfig()
         self.logger = logging.getLogger(__name__)
-        self.stripe_client = StripeClient()
+    
+    # =============================================================================
+    # CUSTOMER MANAGEMENT
+    # =============================================================================
+    
+    def create_stripe_customer(self, user_id: int) -> Dict[str, Any]:
+        """
+        Create Stripe customer for user
+        """
+        try:
+            user = User.query.get(user_id)
+            if not user:
+                return {'success': False, 'error': 'User not found'}
+            
+            # Check if customer already exists
+            if hasattr(user, 'stripe_customer_id') and user.stripe_customer_id:
+                try:
+                    customer = stripe.Customer.retrieve(user.stripe_customer_id)
+                    if customer.deleted:
+                        # Customer was deleted, create new one
+                        pass
+                    else:
+                        return {
+                            'success': True,
+                            'customer_id': user.stripe_customer_id,
+                            'existing': True
+                        }
+                except stripe.error.InvalidRequestError:
+                    # Customer doesn't exist, create new one
+                    pass
+            
+            # Create new Stripe customer
+            customer_data = {
+                'email': user.email,
+                'name': f"{user.first_name or ''} {user.last_name or ''}".strip(),
+                'metadata': {
+                    'user_id': str(user.id),
+                    'username': user.username
+                }
+            }
+            
+            if user.phone_number:
+                customer_data['phone'] = user.phone_number
+            
+            customer = stripe.Customer.create(**customer_data)
+            
+            # Store customer ID in user model
+            user.stripe_customer_id = customer.id
+            db.session.commit()
+            
+            self.logger.info(f"Created Stripe customer {customer.id} for user {user_id}")
+            
+            return {
+                'success': True,
+                'customer_id': customer.id,
+                'existing': False
+            }
+            
+        except Exception as e:
+            db.session.rollback()
+            self.logger.error(f"Create Stripe customer error: {str(e)}")
+            return {'success': False, 'error': 'Failed to create customer'}
+    
+    def get_stripe_customer(self, user_id: int) -> Dict[str, Any]:
+        """
+        Get or create Stripe customer for user
+        """
+        user = User.query.get(user_id)
+        if not user:
+            return {'success': False, 'error': 'User not found'}
+        
+        if hasattr(user, 'stripe_customer_id') and user.stripe_customer_id:
+            try:
+                customer = stripe.Customer.retrieve(user.stripe_customer_id)
+                return {
+                    'success': True,
+                    'customer': customer
+                }
+            except stripe.error.InvalidRequestError:
+                # Customer doesn't exist, create new one
+                pass
+        
+        # Create new customer
+        return self.create_stripe_customer(user_id)
+    
+    # =============================================================================
+    # PAYMENT METHOD MANAGEMENT
+    # =============================================================================
+    
+    def add_payment_method(self, user_id: int, payment_method_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Add payment method for user
+        """
+        try:
+            # Get or create Stripe customer
+            customer_result = self.get_stripe_customer(user_id)
+            if not customer_result['success']:
+                return customer_result
+            
+            customer_id = customer_result['customer'].id
+            
+            # Attach payment method to customer
+            payment_method = stripe.PaymentMethod.attach(
+                payment_method_data['payment_method_id'],
+                customer=customer_id
+            )
+            
+            # Store payment method in database
+            payment_method_record = PaymentMethod(
+                user_id=user_id,
+                type=payment_method.type,
+                stripe_payment_method_id=payment_method.id,
+                is_default=payment_method_data.get('is_default', False)
+            )
+            
+            # Add card details if it's a card
+            if payment_method.type == 'card':
+                card = payment_method.card
+                payment_method_record.card_brand = card.brand
+                payment_method_record.card_last4 = card.last4
+                payment_method_record.card_exp_month = card.exp_month
+                payment_method_record.card_exp_year = card.exp_year
+            
+            # Set as default if requested or if it's the first payment method
+            if payment_method_data.get('is_default', False) or not PaymentMethod.query.filter_by(user_id=user_id).first():
+                # Remove default flag from other payment methods
+                PaymentMethod.query.filter_by(user_id=user_id, is_default=True).update({'is_default': False})
+                payment_method_record.is_default = True
+            
+            db.session.add(payment_method_record)
+            db.session.commit()
+            
+            return {
+                'success': True,
+                'payment_method': payment_method_record.to_dict()
+            }
+            
+        except stripe.error.StripeError as e:
+            self.logger.error(f"Stripe payment method error: {str(e)}")
+            return {'success': False, 'error': str(e)}
+        except Exception as e:
+            db.session.rollback()
+            self.logger.error(f"Add payment method error: {str(e)}")
+            return {'success': False, 'error': 'Failed to add payment method'}
+    
+    def get_payment_methods(self, user_id: int) -> Dict[str, Any]:
+        """
+        Get user's payment methods
+        """
+        try:
+            payment_methods = PaymentMethod.query.filter_by(
+                user_id=user_id,
+                status='active'
+            ).order_by(PaymentMethod.is_default.desc(), PaymentMethod.created_at.desc()).all()
+            
+            return {
+                'success': True,
+                'payment_methods': [pm.to_dict() for pm in payment_methods]
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Get payment methods error: {str(e)}")
+            return {'success': False, 'error': 'Failed to fetch payment methods'}
+    
+    def set_default_payment_method(self, user_id: int, payment_method_id: int) -> Dict[str, Any]:
+        """
+        Set default payment method for user
+        """
+        try:
+            # Remove default flag from all payment methods
+            PaymentMethod.query.filter_by(user_id=user_id, is_default=True).update({'is_default': False})
+            
+            # Set new default
+            payment_method = PaymentMethod.query.filter_by(
+                id=payment_method_id,
+                user_id=user_id
+            ).first()
+            
+            if not payment_method:
+                return {'success': False, 'error': 'Payment method not found'}
+            
+            payment_method.is_default = True
+            db.session.commit()
+            
+            return {
+                'success': True,
+                'payment_method': payment_method.to_dict()
+            }
+            
+        except Exception as e:
+            db.session.rollback()
+            self.logger.error(f"Set default payment method error: {str(e)}")
+            return {'success': False, 'error': 'Failed to set default payment method'}
     
     # =============================================================================
     # SUBSCRIPTION MANAGEMENT
     # =============================================================================
     
     def create_subscription(self, user_id: int, plan_id: int, 
-                          payment_method_id: str = None, billing_cycle: str = 'monthly') -> Subscription:
-        """Create new subscription with payment setup"""
+                          billing_cycle: str = 'monthly') -> Dict[str, Any]:
+        """
+        Create new subscription for user
+        """
         try:
-            user = User.query.get_or_404(user_id)
-            plan = SubscriptionPlan.query.get_or_404(plan_id)
+            user = User.query.get(user_id)
+            plan = SubscriptionPlan.query.get(plan_id)
+            
+            if not user or not plan:
+                return {'success': False, 'error': 'User or plan not found'}
             
             # Check if user already has active subscription
-            existing_sub = self.get_user_active_subscription(user_id)
-            if existing_sub:
-                raise ValueError("User already has an active subscription")
+            existing_subscription = Subscription.query.filter_by(
+                user_id=user_id,
+                status='active'
+            ).first()
             
-            # Calculate pricing
-            amount = plan.monthly_price if billing_cycle == 'monthly' else plan.annual_price
-            period_start = datetime.utcnow()
-            period_end = self._calculate_period_end(period_start, billing_cycle)
+            if existing_subscription:
+                return {'success': False, 'error': 'User already has active subscription'}
             
-            # Create Stripe subscription if payment method provided
-            stripe_subscription_id = None
-            if payment_method_id:
-                stripe_sub = self.stripe_client.create_subscription(
-                    customer_id=user.stripe_customer_id,
-                    price_id=self._get_stripe_price_id(plan, billing_cycle),
-                    payment_method_id=payment_method_id
-                )
-                stripe_subscription_id = stripe_sub.id
+            # Get Stripe customer
+            customer_result = self.get_stripe_customer(user_id)
+            if not customer_result['success']:
+                return customer_result
+            
+            customer_id = customer_result['customer'].id
+            
+            # Get default payment method
+            default_pm = PaymentMethod.query.filter_by(
+                user_id=user_id,
+                is_default=True,
+                status='active'
+            ).first()
+            
+            if not default_pm:
+                return {'success': False, 'error': 'No payment method available'}
+            
+            # Determine price based on billing cycle
+            price_amount = plan.monthly_price if billing_cycle == 'monthly' else plan.annual_price
+            stripe_price_id = plan.stripe_price_id_monthly if billing_cycle == 'monthly' else plan.stripe_price_id_annual
+            
+            if not stripe_price_id:
+                return {'success': False, 'error': 'Plan not configured for this billing cycle'}
+            
+            # Create Stripe subscription
+            stripe_subscription = stripe.Subscription.create(
+                customer=customer_id,
+                items=[{'price': stripe_price_id}],
+                default_payment_method=default_pm.stripe_payment_method_id,
+                metadata={
+                    'user_id': str(user_id),
+                    'plan_id': str(plan_id)
+                }
+            )
             
             # Create local subscription record
             subscription = Subscription(
                 user_id=user_id,
                 plan_id=plan_id,
-                status='trialing' if plan.trial_period_days > 0 else 'active',
+                status=stripe_subscription.status,
                 billing_cycle=billing_cycle,
-                current_period_start=period_start,
-                current_period_end=period_end,
-                amount=amount,
-                currency=plan.currency,
-                stripe_subscription_id=stripe_subscription_id
+                current_period_start=datetime.fromtimestamp(stripe_subscription.current_period_start),
+                current_period_end=datetime.fromtimestamp(stripe_subscription.current_period_end),
+                amount=price_amount,
+                stripe_subscription_id=stripe_subscription.id,
+                stripe_customer_id=customer_id
             )
             
-            # Set trial end if applicable
-            if plan.trial_period_days > 0:
-                subscription.trial_start = period_start
-                subscription.trial_end = period_start + timedelta(days=plan.trial_period_days)
+            # Handle trial period
+            if stripe_subscription.trial_end:
+                subscription.trial_end = datetime.fromtimestamp(stripe_subscription.trial_end)
             
             db.session.add(subscription)
             db.session.commit()
             
             self.logger.info(f"Created subscription {subscription.id} for user {user_id}")
-            return subscription
+            
+            return {
+                'success': True,
+                'subscription': subscription.to_dict()
+            }
+            
+        except stripe.error.StripeError as e:
+            db.session.rollback()
+            self.logger.error(f"Stripe subscription error: {str(e)}")
+            return {'success': False, 'error': str(e)}
+        except Exception as e:
+            db.session.rollback()
+            self.logger.error(f"Create subscription error: {str(e)}")
+            return {'success': False, 'error': 'Failed to create subscription'}
+    
+    def create_trial_subscription(self, user_id: int, plan_id: int) -> Dict[str, Any]:
+        """
+        Create trial subscription for user
+        """
+        try:
+            user = User.query.get(user_id)
+            plan = SubscriptionPlan.query.get(plan_id)
+            
+            if not user or not plan:
+                return {'success': False, 'error': 'User or plan not found'}
+            
+            # Create trial subscription (local only, no Stripe subscription yet)
+            trial_end = datetime.utcnow() + timedelta(days=plan.trial_period_days or 14)
+            
+            subscription = Subscription(
+                user_id=user_id,
+                plan_id=plan_id,
+                status='trialing',
+                billing_cycle='monthly',  # Default to monthly
+                current_period_start=datetime.utcnow(),
+                current_period_end=trial_end,
+                trial_end=trial_end,
+                amount=plan.monthly_price
+            )
+            
+            db.session.add(subscription)
+            db.session.commit()
+            
+            return {
+                'success': True,
+                'subscription': subscription.to_dict()
+            }
             
         except Exception as e:
             db.session.rollback()
-            self.logger.error(f"Failed to create subscription: {str(e)}")
-            raise Exception(f"Failed to create subscription: {str(e)}")
+            self.logger.error(f"Create trial subscription error: {str(e)}")
+            return {'success': False, 'error': 'Failed to create trial subscription'}
     
-    def update_subscription(self, subscription_id: int, **updates) -> Subscription:
-        """Update subscription settings"""
+    def cancel_subscription(self, user_id: int, reason: str = None) -> Dict[str, Any]:
+        """
+        Cancel user's subscription
+        """
         try:
-            subscription = Subscription.query.get_or_404(subscription_id)
+            subscription = Subscription.query.filter_by(
+                user_id=user_id,
+                status='active'
+            ).first()
             
-            # Handle plan changes
-            if 'plan_id' in updates:
-                new_plan = SubscriptionPlan.query.get_or_404(updates['plan_id'])
-                old_amount = subscription.amount
-                new_amount = (new_plan.monthly_price if subscription.billing_cycle == 'monthly' 
-                            else new_plan.annual_price)
-                
-                # Calculate proration if needed
-                if new_amount != old_amount:
-                    self._handle_plan_change_proration(subscription, new_plan, new_amount)
-                
-                subscription.plan_id = updates['plan_id']
-                subscription.amount = new_amount
+            if not subscription:
+                return {'success': False, 'error': 'No active subscription found'}
             
-            # Handle billing cycle changes
-            if 'billing_cycle' in updates:
-                subscription.billing_cycle = updates['billing_cycle']
-                # Recalculate amount based on new cycle
-                plan = subscription.plan
-                subscription.amount = (plan.monthly_price if updates['billing_cycle'] == 'monthly' 
-                                     else plan.annual_price)
-            
-            # Update other fields
-            for field in ['auto_renew', 'metadata']:
-                if field in updates:
-                    setattr(subscription, field, updates[field])
-            
-            # Update in Stripe if needed
+            # Cancel Stripe subscription if it exists
             if subscription.stripe_subscription_id:
-                self.stripe_client.update_subscription(
+                stripe_subscription = stripe.Subscription.modify(
                     subscription.stripe_subscription_id,
-                    updates
+                    cancel_at_period_end=True,
+                    metadata={'cancellation_reason': reason or 'User requested'}
                 )
-            
-            db.session.commit()
-            self.logger.info(f"Updated subscription {subscription_id}")
-            return subscription
-            
-        except Exception as e:
-            db.session.rollback()
-            self.logger.error(f"Failed to update subscription: {str(e)}")
-            raise Exception(f"Failed to update subscription: {str(e)}")
-    
-    def cancel_subscription(self, subscription_id: int, reason: str = None, 
-                          immediate: bool = False) -> bool:
-        """Cancel subscription and cleanup resources"""
-        try:
-            subscription = Subscription.query.get_or_404(subscription_id)
-            
-            # Cancel in Stripe
-            if subscription.stripe_subscription_id:
-                self.stripe_client.cancel_subscription(
-                    subscription.stripe_subscription_id, 
-                    immediately=immediate
-                )
-            
-            # Update local record
-            if immediate:
+                
                 subscription.status = 'canceled'
-                subscription.current_period_end = datetime.utcnow()
+                subscription.canceled_at = datetime.utcnow()
             else:
-                subscription.status = 'pending_cancel'
-                subscription.auto_renew = False
-            
-            subscription.canceled_at = datetime.utcnow()
-            subscription.cancellation_reason = reason
+                # Trial subscription, cancel immediately
+                subscription.status = 'canceled'
+                subscription.canceled_at = datetime.utcnow()
+                subscription.ended_at = datetime.utcnow()
             
             db.session.commit()
-            self.logger.info(f"Canceled subscription {subscription_id}")
-            return True
             
+            return {
+                'success': True,
+                'subscription': subscription.to_dict(),
+                'message': 'Subscription canceled successfully'
+            }
+            
+        except stripe.error.StripeError as e:
+            self.logger.error(f"Stripe cancellation error: {str(e)}")
+            return {'success': False, 'error': str(e)}
         except Exception as e:
             db.session.rollback()
-            self.logger.error(f"Failed to cancel subscription: {str(e)}")
-            raise Exception(f"Failed to cancel subscription: {str(e)}")
+            self.logger.error(f"Cancel subscription error: {str(e)}")
+            return {'success': False, 'error': 'Failed to cancel subscription'}
     
-    def get_user_active_subscription(self, user_id: int) -> Optional[Subscription]:
-        """Get user's active subscription"""
-        return Subscription.query.filter_by(
-            user_id=user_id,
-            status='active'
-        ).first()
-    
-    def get_subscription_with_plan(self, subscription_id: int) -> Optional[Subscription]:
-        """Get subscription with plan details"""
-        return Subscription.query.options(
-            db.joinedload(Subscription.plan)
-        ).get(subscription_id)
+    def get_user_subscription(self, user_id: int) -> Dict[str, Any]:
+        """
+        Get user's current subscription
+        """
+        try:
+            subscription = Subscription.query.filter_by(user_id=user_id).first()
+            
+            if not subscription:
+                return {
+                    'success': True,
+                    'subscription': None,
+                    'has_subscription': False
+                }
+            
+            return {
+                'success': True,
+                'subscription': subscription.to_dict(),
+                'has_subscription': True
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Get subscription error: {str(e)}")
+            return {'success': False, 'error': 'Failed to fetch subscription'}
     
     # =============================================================================
     # USAGE TRACKING
     # =============================================================================
     
-    def track_usage(self, user_id: int, resource_type: str, quantity: int = 1, 
-                   metadata: Dict[str, Any] = None) -> None:
-        """Track resource usage for billing"""
+    def track_usage(self, user_id: int, metric_type: str, quantity: int = 1, 
+                   resource_id: str = None, resource_type: str = None) -> Dict[str, Any]:
+        """
+        Track usage for billing purposes
+        """
         try:
-            subscription = self.get_user_active_subscription(user_id)
-            if not subscription:
-                # No active subscription - skip tracking for trial users
-                return
+            user = User.query.get(user_id)
+            if not user:
+                return {'success': False, 'error': 'User not found'}
             
-            # Get current billing period
-            period_start = subscription.current_period_start
-            period_end = subscription.current_period_end
+            subscription = Subscription.query.filter_by(user_id=user_id).first()
             
-            # Find existing usage record for this period
-            usage_record = UsageRecord.query.filter_by(
+            # Calculate billing period
+            now = datetime.utcnow()
+            if subscription and subscription.current_period_start:
+                billing_start = subscription.current_period_start
+                billing_end = subscription.current_period_end
+            else:
+                # Default to monthly period
+                billing_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                if billing_start.month == 12:
+                    billing_end = billing_start.replace(year=billing_start.year + 1, month=1)
+                else:
+                    billing_end = billing_start.replace(month=billing_start.month + 1)
+            
+            # Create usage record
+            usage_record = UsageRecord(
                 user_id=user_id,
-                subscription_id=subscription.id,
+                subscription_id=subscription.id if subscription else None,
+                metric_type=metric_type,
+                quantity=quantity,
+                resource_id=resource_id,
                 resource_type=resource_type,
-                period_start=period_start,
-                period_end=period_end
+                billing_period_start=billing_start,
+                billing_period_end=billing_end
+            )
+            
+            # Calculate cost based on metric type (if applicable)
+            unit_cost = self._get_unit_cost(metric_type)
+            if unit_cost:
+                usage_record.unit_cost = Decimal(str(unit_cost))
+                usage_record.total_cost = Decimal(str(unit_cost)) * quantity
+            
+            db.session.add(usage_record)
+            db.session.commit()
+            
+            return {
+                'success': True,
+                'usage_record': usage_record.to_dict()
+            }
+            
+        except Exception as e:
+            db.session.rollback()
+            self.logger.error(f"Track usage error: {str(e)}")
+            return {'success': False, 'error': 'Failed to track usage'}
+    
+    def get_usage_summary(self, user_id: int, days: int = 30) -> Dict[str, Any]:
+        """
+        Get usage summary for user
+        """
+        try:
+            start_date = datetime.utcnow() - timedelta(days=days)
+            
+            usage_records = UsageRecord.query.filter(
+                UsageRecord.user_id == user_id,
+                UsageRecord.created_at >= start_date
+            ).all()
+            
+            summary = {
+                'sms_sent': 0,
+                'sms_received': 0,
+                'ai_responses': 0,
+                'total_cost': Decimal('0.00'),
+                'period_days': days
+            }
+            
+            for record in usage_records:
+                if record.metric_type in summary:
+                    summary[record.metric_type] += record.quantity
+                if record.total_cost:
+                    summary['total_cost'] += record.total_cost
+            
+            # Convert Decimal to float for JSON serialization
+            summary['total_cost'] = float(summary['total_cost'])
+            
+            return {
+                'success': True,
+                'usage_summary': summary
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Get usage summary error: {str(e)}")
+            return {'success': False, 'error': 'Failed to fetch usage summary'}
+    
+    def check_usage_limits(self, user_id: int) -> Dict[str, Any]:
+        """
+        Check if user has exceeded usage limits
+        """
+        try:
+            user = User.query.get(user_id)
+            subscription = Subscription.query.filter_by(user_id=user_id).first()
+            
+            if not subscription or not subscription.plan:
+                return {
+                    'success': True,
+                    'within_limits': False,
+                    'reason': 'No active subscription'
+                }
+            
+            plan_features = subscription.plan.features
+            
+            # Get current period usage
+            current_usage = self._get_current_period_usage(user_id, subscription)
+            
+            # Check SMS limits
+            sms_limit = plan_features.get('sms_credits_monthly', 0)
+            if subscription.billing_cycle == 'annual':
+                sms_limit = plan_features.get('sms_credits_annual', sms_limit * 12)
+            
+            sms_used = current_usage.get('sms_sent', 0) + current_usage.get('sms_received', 0)
+            
+            # Check AI response limits
+            ai_limit = plan_features.get('ai_responses_monthly', 0)
+            if subscription.billing_cycle == 'annual':
+                ai_limit = plan_features.get('ai_responses_annual', ai_limit * 12)
+            
+            ai_used = current_usage.get('ai_responses', 0)
+            
+            limits_check = {
+                'sms': {
+                    'limit': sms_limit,
+                    'used': sms_used,
+                    'remaining': max(0, sms_limit - sms_used),
+                    'percentage': (sms_used / sms_limit * 100) if sms_limit > 0 else 0
+                },
+                'ai_responses': {
+                    'limit': ai_limit,
+                    'used': ai_used,
+                    'remaining': max(0, ai_limit - ai_used),
+                    'percentage': (ai_used / ai_limit * 100) if ai_limit > 0 else 0
+                }
+            }
+            
+            within_limits = (sms_used < sms_limit and ai_used < ai_limit)
+            
+            return {
+                'success': True,
+                'within_limits': within_limits,
+                'limits': limits_check,
+                'current_usage': current_usage
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Check usage limits error: {str(e)}")
+            return {'success': False, 'error': 'Failed to check usage limits'}
+    
+    # =============================================================================
+    # WEBHOOK PROCESSING
+    # =============================================================================
+    
+    def process_stripe_webhook(self, payload: bytes, signature: str) -> Dict[str, Any]:
+        """
+        Process Stripe webhook events
+        """
+        try:
+            event = stripe.Webhook.construct_event(
+                payload, signature, self.config.webhook_secret
+            )
+            
+            event_type = event['type']
+            event_data = event['data']['object']
+            
+            self.logger.info(f"Processing Stripe webhook: {event_type}")
+            
+            # Handle different event types
+            if event_type == 'customer.subscription.updated':
+                return self._handle_subscription_updated(event_data)
+            elif event_type == 'customer.subscription.deleted':
+                return self._handle_subscription_deleted(event_data)
+            elif event_type == 'invoice.payment_succeeded':
+                return self._handle_payment_succeeded(event_data)
+            elif event_type == 'invoice.payment_failed':
+                return self._handle_payment_failed(event_data)
+            elif event_type == 'customer.subscription.trial_will_end':
+                return self._handle_trial_will_end(event_data)
+            else:
+                return {
+                    'success': True,
+                    'message': f'Unhandled event type: {event_type}'
+                }
+                
+        except stripe.error.SignatureVerificationError as e:
+            self.logger.error(f"Webhook signature verification failed: {str(e)}")
+            return {'success': False, 'error': 'Invalid signature'}
+        except Exception as e:
+            self.logger.error(f"Webhook processing error: {str(e)}")
+            return {'success': False, 'error': 'Webhook processing failed'}
+    
+    def _handle_subscription_updated(self, subscription_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle subscription update webhook"""
+        try:
+            subscription = Subscription.query.filter_by(
+                stripe_subscription_id=subscription_data['id']
             ).first()
             
-            if usage_record:
-                usage_record.quantity += quantity
-            else:
-                # Calculate unit cost if applicable
-                unit_cost = self._get_unit_cost(subscription.plan, resource_type)
-                
-                usage_record = UsageRecord(
-                    user_id=user_id,
-                    subscription_id=subscription.id,
-                    resource_type=resource_type,
-                    quantity=quantity,
-                    unit_cost=unit_cost,
-                    total_cost=unit_cost * quantity,
-                    period_start=period_start,
-                    period_end=period_end,
-                    usage_metadata=metadata
+            if subscription:
+                subscription.status = subscription_data['status']
+                subscription.current_period_start = datetime.fromtimestamp(
+                    subscription_data['current_period_start']
                 )
-                db.session.add(usage_record)
-            
-            db.session.commit()
-            
-        except Exception as e:
-            db.session.rollback()
-            self.logger.error(f"Failed to track usage: {str(e)}")
-            # Don't raise exception for usage tracking - log and continue
-    
-    def get_usage_summary(self, user_id: int, period_start: datetime = None, 
-                         period_end: datetime = None) -> Dict[str, Any]:
-        """Get usage summary for user"""
-        subscription = self.get_user_active_subscription(user_id)
-        if not subscription:
-            return {
-                'usage': {},
-                'limits': {},
-                'period_start': None,
-                'period_end': None,
-                'percentage_used': {}
-            }
-        
-        # Use subscription period if not specified
-        if not period_start:
-            period_start = subscription.current_period_start
-        if not period_end:
-            period_end = subscription.current_period_end
-        
-        # Get usage records for period
-        usage_records = UsageRecord.query.filter_by(
-            user_id=user_id,
-            subscription_id=subscription.id,
-            period_start=period_start,
-            period_end=period_end
-        ).all()
-        
-        # Aggregate usage by resource type
-        usage_summary = {}
-        for record in usage_records:
-            usage_summary[record.resource_type] = record.quantity
-        
-        # Get plan limits
-        plan_features = subscription.plan.features or {}
-        limits = {
-            'sms_messages': plan_features.get('sms_credits_monthly', 0),
-            'ai_responses': plan_features.get('ai_responses_monthly', 0),
-            'storage_gb': plan_features.get('storage_gb', 0)
-        }
-        
-        # Calculate percentage used
-        percentage_used = {}
-        for resource_type, limit in limits.items():
-            if limit > 0:
-                used = usage_summary.get(resource_type, 0)
-                percentage_used[resource_type] = min(100, (used / limit) * 100)
-        
-        return {
-            'usage': usage_summary,
-            'limits': limits,
-            'period_start': period_start,
-            'period_end': period_end,
-            'percentage_used': percentage_used,
-            'subscription_id': subscription.id
-        }
-    
-    def check_usage_limits(self, user_id: int, resource_type: str, 
-                          requested_quantity: int = 1) -> Tuple[bool, Dict[str, Any]]:
-        """Check if user can use more of a resource"""
-        usage_summary = self.get_usage_summary(user_id)
-        
-        if not usage_summary['limits']:
-            # No subscription = unlimited (trial mode)
-            return True, {'reason': 'no_subscription', 'unlimited': True}
-        
-        current_usage = usage_summary['usage'].get(resource_type, 0)
-        limit = usage_summary['limits'].get(resource_type, 0)
-        
-        if limit == 0:
-            # Unlimited for this resource
-            return True, {'reason': 'unlimited_resource'}
-        
-        can_use = (current_usage + requested_quantity) <= limit
-        
-        return can_use, {
-            'current_usage': current_usage,
-            'limit': limit,
-            'requested': requested_quantity,
-            'would_total': current_usage + requested_quantity,
-            'remaining': max(0, limit - current_usage)
-        }
-    
-    # =============================================================================
-    # INVOICE MANAGEMENT
-    # =============================================================================
-    
-    def generate_invoice(self, subscription_id: int, invoice_items: List[Dict] = None) -> Invoice:
-        """Generate invoice for subscription"""
-        try:
-            subscription = Subscription.query.get_or_404(subscription_id)
-            plan = subscription.plan
-            
-            # Generate unique invoice number
-            invoice_number = self._generate_invoice_number()
-            
-            # Calculate invoice amounts
-            subtotal = Decimal('0.00')
-            
-            # Create invoice
-            invoice = Invoice(
-                user_id=subscription.user_id,
-                subscription_id=subscription_id,
-                invoice_number=invoice_number,
-                status='draft',
-                subtotal=subtotal,
-                tax_amount=Decimal('0.00'),
-                total_amount=subtotal,
-                amount_due=subtotal,
-                currency=plan.currency,
-                invoice_date=datetime.utcnow(),
-                due_date=datetime.utcnow() + timedelta(days=30)
-            )
-            
-            db.session.add(invoice)
-            db.session.flush()  # Get invoice ID
-            
-            # Add subscription fee as line item
-            subscription_item = InvoiceItem(
-                invoice_id=invoice.id,
-                description=f"{plan.name} - {subscription.billing_cycle.title()} Plan",
-                quantity=1,
-                unit_price=subscription.amount,
-                total_price=subscription.amount,
-                item_type='subscription',
-                period_start=subscription.current_period_start,
-                period_end=subscription.current_period_end
-            )
-            db.session.add(subscription_item)
-            subtotal += subscription.amount
-            
-            # Add usage-based items if any
-            if invoice_items:
-                for item_data in invoice_items:
-                    item = InvoiceItem(
-                        invoice_id=invoice.id,
-                        **item_data
+                subscription.current_period_end = datetime.fromtimestamp(
+                    subscription_data['current_period_end']
+                )
+                
+                if subscription_data.get('canceled_at'):
+                    subscription.canceled_at = datetime.fromtimestamp(
+                        subscription_data['canceled_at']
                     )
-                    db.session.add(item)
-                    subtotal += item.total_price
+                
+                db.session.commit()
             
-            # Update invoice totals
-            invoice.subtotal = subtotal
-            invoice.total_amount = subtotal
-            invoice.amount_due = subtotal
-            
-            db.session.commit()
-            
-            self.logger.info(f"Generated invoice {invoice.invoice_number} for subscription {subscription_id}")
-            return invoice
-            
+            return {'success': True, 'message': 'Subscription updated'}
         except Exception as e:
             db.session.rollback()
-            self.logger.error(f"Failed to generate invoice: {str(e)}")
-            raise Exception(f"Failed to generate invoice: {str(e)}")
+            self.logger.error(f"Handle subscription updated error: {str(e)}")
+            return {'success': False, 'error': str(e)}
     
-    def process_payment(self, invoice_id: int, payment_method_id: int = None) -> Payment:
-        """Process payment for invoice"""
+    def _handle_subscription_deleted(self, subscription_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle subscription deletion webhook"""
         try:
-            invoice = Invoice.query.get_or_404(invoice_id)
+            subscription = Subscription.query.filter_by(
+                stripe_subscription_id=subscription_data['id']
+            ).first()
             
-            # Use default payment method if not specified
-            if not payment_method_id:
-                default_pm = PaymentMethod.query.filter_by(
-                    user_id=invoice.user_id,
-                    is_default=True
-                ).first()
-                if default_pm:
-                    payment_method_id = default_pm.id
+            if subscription:
+                subscription.status = 'canceled'
+                subscription.ended_at = datetime.utcnow()
+                db.session.commit()
             
-            if not payment_method_id:
-                raise ValueError("No payment method available")
-            
-            payment_method = PaymentMethod.query.get_or_404(payment_method_id)
-            
-            # Process payment with Stripe
-            payment_intent = self.stripe_client.process_payment(
-                amount=float(invoice.amount_due),
-                currency=invoice.currency,
-                payment_method_id=payment_method.stripe_payment_method_id
-            )
-            
-            # Create payment record
-            payment = Payment(
-                user_id=invoice.user_id,
-                invoice_id=invoice_id,
-                payment_method_id=payment_method_id,
-                amount=invoice.amount_due,
-                currency=invoice.currency,
-                status=payment_intent.status,
-                stripe_payment_intent_id=payment_intent.id,
-                processed_at=datetime.utcnow()
-            )
-            
-            db.session.add(payment)
-            
-            # Update invoice status
-            if payment_intent.status == 'succeeded':
-                invoice.status = 'paid'
-                invoice.paid_at = datetime.utcnow()
-                invoice.amount_paid = invoice.amount_due
-                invoice.amount_due = Decimal('0.00')
-            elif payment_intent.status == 'failed':
-                invoice.status = 'payment_failed'
-                payment.failure_reason = "Payment failed"
-            
-            db.session.commit()
-            
-            self.logger.info(f"Processed payment for invoice {invoice.invoice_number}")
-            return payment
-            
+            return {'success': True, 'message': 'Subscription deleted'}
         except Exception as e:
             db.session.rollback()
-            self.logger.error(f"Failed to process payment: {str(e)}")
-            raise Exception(f"Failed to process payment: {str(e)}")
+            self.logger.error(f"Handle subscription deleted error: {str(e)}")
+            return {'success': False, 'error': str(e)}
+    
+    def _handle_payment_succeeded(self, invoice_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle successful payment webhook"""
+        # Implementation for successful payment processing
+        return {'success': True, 'message': 'Payment succeeded'}
+    
+    def _handle_payment_failed(self, invoice_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle failed payment webhook"""
+        # Implementation for failed payment processing
+        return {'success': True, 'message': 'Payment failed processed'}
+    
+    def _handle_trial_will_end(self, subscription_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle trial ending webhook"""
+        # Implementation for trial ending notification
+        return {'success': True, 'message': 'Trial ending processed'}
     
     # =============================================================================
-    # BILLING ANALYTICS
+    # UTILITY METHODS
     # =============================================================================
     
-    def get_billing_analytics(self, user_id: int, months_back: int = 12) -> Dict[str, Any]:
-        """Get billing analytics for user"""
-        start_date = datetime.utcnow() - timedelta(days=months_back * 30)
+    def _get_unit_cost(self, metric_type: str) -> Optional[float]:
+        """Get unit cost for metric type"""
+        costs = {
+            'sms_sent': 0.01,    # $0.01 per SMS
+            'sms_received': 0.005,  # $0.005 per received SMS
+            'ai_response': 0.02   # $0.02 per AI response
+        }
+        return costs.get(metric_type)
+    
+    def _get_current_period_usage(self, user_id: int, subscription: Subscription) -> Dict[str, int]:
+        """Get usage for current billing period"""
+        start_date = subscription.current_period_start
+        end_date = subscription.current_period_end
         
-        # Get payment history
-        payments = Payment.query.filter(
-            Payment.user_id == user_id,
-            Payment.created_at >= start_date,
-            Payment.status == 'succeeded'
-        ).all()
-        
-        # Calculate metrics
-        total_paid = sum(float(p.amount) for p in payments)
-        avg_monthly = total_paid / months_back if months_back > 0 else 0
-        
-        # Get usage trends
         usage_records = UsageRecord.query.filter(
             UsageRecord.user_id == user_id,
-            UsageRecord.created_at >= start_date
+            UsageRecord.billing_period_start >= start_date,
+            UsageRecord.billing_period_end <= end_date
         ).all()
         
-        usage_by_month = {}
+        usage_summary = {}
         for record in usage_records:
-            month_key = record.created_at.strftime('%Y-%m')
-            if month_key not in usage_by_month:
-                usage_by_month[month_key] = {}
-            
-            if record.resource_type not in usage_by_month[month_key]:
-                usage_by_month[month_key][record.resource_type] = 0
-            
-            usage_by_month[month_key][record.resource_type] += record.quantity
+            metric = record.metric_type
+            if metric not in usage_summary:
+                usage_summary[metric] = 0
+            usage_summary[metric] += record.quantity
         
-        return {
-            'total_paid': total_paid,
-            'average_monthly': avg_monthly,
-            'payment_count': len(payments),
-            'usage_by_month': usage_by_month,
-            'period_start': start_date,
-            'period_end': datetime.utcnow()
-        }
-    
-    # =============================================================================
-    # HELPER METHODS
-    # =============================================================================
-    
-    def _calculate_period_end(self, start_date: datetime, billing_cycle: str) -> datetime:
-        """Calculate billing period end date"""
-        if billing_cycle == 'monthly':
-            return start_date + timedelta(days=30)
-        elif billing_cycle == 'annual':
-            return start_date + timedelta(days=365)
-        else:
-            raise ValueError(f"Invalid billing cycle: {billing_cycle}")
-    
-    def _generate_invoice_number(self) -> str:
-        """Generate unique invoice number"""
-        timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
-        return f"INV-{timestamp}"
-    
-    def _get_stripe_price_id(self, plan: SubscriptionPlan, billing_cycle: str) -> str:
-        """Get Stripe price ID for plan and billing cycle"""
-        # This would be stored in plan metadata or separate table
-        metadata = plan.sub_plan_metadata or {}
-        price_key = f"stripe_price_id_{billing_cycle}"
-        return metadata.get(price_key)
-    
-    def _get_unit_cost(self, plan: SubscriptionPlan, resource_type: str) -> Decimal:
-        """Get unit cost for resource type"""
-        # For now, return 0 - usage is included in subscription
-        # Future: implement usage-based pricing
-        return Decimal('0.00')
-    
-    def _handle_plan_change_proration(self, subscription: Subscription, 
-                                    new_plan: SubscriptionPlan, new_amount: Decimal):
-        """Handle proration when changing plans"""
-        # Calculate proration based on remaining time in period
-        now = datetime.utcnow()
-        total_period = (subscription.current_period_end - subscription.current_period_start).days
-        remaining_days = (subscription.current_period_end - now).days
-        
-        if remaining_days > 0:
-            proration_factor = remaining_days / total_period
-            old_remaining = float(subscription.amount) * proration_factor
-            new_remaining = float(new_amount) * proration_factor
-            proration_amount = new_remaining - old_remaining
-            
-            self.logger.info(f"Plan change proration: {proration_amount}")
-            # TODO: Create proration invoice item if amount > 0
+        return usage_summary

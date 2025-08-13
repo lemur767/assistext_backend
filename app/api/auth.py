@@ -1,443 +1,204 @@
-# app/api/auth.py - Complete auth implementation with subscription checking
-from flask import Blueprint, request, jsonify
-from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required
-from app.models import User, db
-from app.services import integration_service
-from datetime import datetime, timedelta
-import logging
+from flask import Blueprint, request, jsonify, current_app
+from flask_jwt_extended import (
+    jwt_required, get_jwt_identity, create_access_token, 
+    create_refresh_token, get_jwt
+)
+from marshmallow import Schema, fields, ValidationError
+from datetime import datetime
+
+from app.services import get_user_service
+from app.models import User
+from app.extensions import db
+from app.utils.validators import validate_request_json
 
 auth_bp = Blueprint('auth', __name__)
-logger = logging.getLogger(__name__)
 
-signalwire_service = integration_service.get_signalwire_service()
+# Request Schemas
+class RegisterSchema(Schema):
+    username = fields.Str(required=True, validate=lambda x: len(x) >= 3)
+    email = fields.Email(required=True)
+    password = fields.Str(required=True, validate=lambda x: len(x) >= 8)
+    first_name = fields.Str(allow_none=True)
+    last_name = fields.Str(allow_none=True)
+    phone_number = fields.Str(allow_none=True)
+    timezone = fields.Str(missing='UTC')
 
-@auth_bp.route('/register', methods=['POST', 'OPTIONS'])
+class LoginSchema(Schema):
+    email_or_username = fields.Str(required=True)
+    password = fields.Str(required=True)
+
+class StartTrialSchema(Schema):
+    payment_method_id = fields.Str(required=True)
+    preferred_area_code = fields.Str(missing='416')
+    billing_address = fields.Dict(allow_none=True)
+
+@auth_bp.route('/register', methods=['POST'])
+@validate_request_json(RegisterSchema())
 def register():
-    """Step 1: Register user and create SignalWire subproject"""
+    """Register new user"""
     try:
-        if request.method == 'OPTIONS':
-            return '', 204
+        data = request.get_json()
+        user_service = get_user_service()
         
-        data = request.get_json() or {}
+        result = user_service.register_user(data)
         
-        # Validate required fields
-        required_fields = ['username', 'email', 'password', 'confirm_password', 'first_name', 'last_name']
-        missing_fields = [field for field in required_fields if not data.get(field)]
-        
-        if missing_fields:
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'user': result['user'],
+                'tokens': result['tokens'],
+                'message': result['message']
+            }), 201
+        else:
             return jsonify({
                 'success': False,
-                'error': f"Missing required fields: {', '.join(missing_fields)}"
+                'error': result.get('error'),
+                'errors': result.get('errors')
             }), 400
-        
-        # Validate password confirmation
-        if data['password'] != data['confirm_password']:
-            return jsonify({
-                'success': False,
-                'error': 'Passwords do not match'
-            }), 400
-        
-        # Check if user already exists
-        existing_user = User.query.filter(
-            (User.email == data['email']) | (User.username == data['username'])
-        ).first()
-        
-        if existing_user:
-            return jsonify({
-                'success': False,
-                'error': 'User with this email or username already exists'
-            }), 400
-        
-        logger.info(f"Starting registration for: {data['email']}")
-        
-        # Create user account
-        user = User(
-            username=data['username'],
-            email=data['email'],
-            first_name=data['first_name'],
-            last_name=data['last_name'],
-            personal_phone=data.get('personal_phone'),
-            signalwire_setup_step=0  # Step 0: Account created, no subproject yet
-        )
-        user.set_password(data['password'])
-        db.session.add(user)
-        db.session.flush()  # Get user ID
-        
-        # Step 1: Create SignalWire subproject
-        logger.info(f"Creating SignalWire subproject for user {user.id}")
-        subproject_result = signalwire_service.create_subproject_for_user(user.id, user.username, user.email)
-        
-        if not subproject_result['success']:
-            db.session.rollback()
-            return jsonify({
-                'success': False,
-                'error': 'Failed to create communication account',
-                'details': subproject_result['error']
-            }), 500
-        
-        # Store subproject details
-        user.signalwire_subproject_sid = subproject_result['subproject_sid']
-        user.signalwire_subproject_token = subproject_result['subproject_token']
-        user.signalwire_setup_step = 1  # Step 1: Subproject created, ready for phone number
-        user.trial_phone_expires_at = datetime.utcnow() + timedelta(days=14)
-        
-        db.session.commit()
-        
-        # Create JWT token
-        access_token = create_access_token(identity=user.id)
-        
-        logger.info(f"Registration successful for user {user.id} with subproject {subproject_result['subproject_sid']}")
-        
-        return jsonify({
-            'message': 'User registered successfully',
-            'access_token': access_token,
-            'user': {
-                'id': user.id,
-                'username': user.username,
-                'email': user.email,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-                'signalwire_setup_step': user.signalwire_setup_step,
-                'signalwire_setup_completed': False,
-                'trial_phone_expires_at': user.trial_phone_expires_at.isoformat()
-            },
-            'next_step': 'phone_number_setup'
-        })
-        
+            
     except Exception as e:
-        db.session.rollback()
-        logger.error(f"Registration failed: {e}")
+        current_app.logger.error(f"Registration error: {str(e)}")
         return jsonify({
             'success': False,
             'error': 'Registration failed'
         }), 500
 
 @auth_bp.route('/login', methods=['POST'])
+@validate_request_json(LoginSchema())
 def login():
-    """Login with subscription/trial checking and SignalWire number management"""
+    """Authenticate user and return tokens"""
     try:
-        data = request.get_json() or {}
+        data = request.get_json()
+        user_service = get_user_service()
         
-        username = data.get('username')
-        password = data.get('password')
+        result = user_service.authenticate_user(
+            data['email_or_username'],
+            data['password']
+        )
         
-        if not username or not password:
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'user': result['user'],
+                'tokens': result['tokens']
+            }), 200
+        else:
             return jsonify({
                 'success': False,
-                'error': 'Missing username or password'
-            }), 400
-        
-        # Find user by username or email
-        user = User.query.filter(
-            (User.username == username) | (User.email == username)
-        ).first()
-        
-        if not user or not user.check_password(password):
-            return jsonify({
-                'success': False,
-                'error': 'Invalid credentials'
+                'error': result['error']
             }), 401
-        
-        # Update last login
-        user.last_login = datetime.utcnow()
-        
-        # Check user profile and subscription status
-        profile_status = _check_user_profile_status(user)
-        
-        # Handle SignalWire number suspension/activation based on status
-        
-        if user.signalwire_phone_number:
-            if profile_status['should_suspend_number']:
-                # Suspend the number
-                suspension_result = signalwire_service.suspend_user_number(user)
-                logger.info(f"Suspended number for user {user.id}: {suspension_result}")
-            elif profile_status['should_activate_number']:
-                # Reactivate the number
-                activation_result = signalwire_service.activate_user_number(user)
-                logger.info(f"Activated number for user {user.id}: {activation_result}")
-        
-        db.session.commit()
-        
-        # Create JWT token
-        access_token = create_access_token(identity=user.id)
-        
-        return jsonify({
-            'access_token': access_token,
-            'user': {
-                'id': user.id,
-                'username': user.username,
-                'email': user.email,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-                'personal_phone': user.personal_phone,
-                'signalwire_phone_number': user.signalwire_phone_number,
-                'signalwire_setup_completed': user.signalwire_setup_completed,
-                'signalwire_setup_step': user.signalwire_setup_step,
-                'is_active': user.is_active,
-                'last_login': user.last_login.isoformat(),
-                'trial_phone_expires_at': user.trial_phone_expires_at.isoformat() if user.trial_phone_expires_at else None
-            },
-            'profile_status': profile_status,
-            'banner': profile_status.get('banner_message'),
-            'requires_payment': profile_status.get('requires_payment', False)
-        })
-        
+            
     except Exception as e:
-        logger.error(f"Login failed: {e}")
+        current_app.logger.error(f"Login error: {str(e)}")
         return jsonify({
             'success': False,
-            'error': 'Login failed'
+            'error': 'Authentication failed'
+        }), 500
+
+@auth_bp.route('/refresh', methods=['POST'])
+@jwt_required(refresh=True)
+def refresh():
+    """Refresh access token"""
+    try:
+        current_user_id = get_jwt_identity()
+        user = User.query.get(current_user_id)
+        
+        if not user or not user.is_active:
+            return jsonify({
+                'success': False,
+                'error': 'User not found or inactive'
+            }), 401
+        
+        # Create new access token
+        additional_claims = {
+            'user_id': user.id,
+            'username': user.username,
+            'trial_status': user.trial_status,
+            'subscription_status': user.subscription.status if user.subscription else None
+        }
+        
+        access_token = create_access_token(
+            identity=current_user_id,
+            additional_claims=additional_claims
+        )
+        
+        return jsonify({
+            'success': True,
+            'access_token': access_token
+        }), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Token refresh error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Token refresh failed'
         }), 500
 
 @auth_bp.route('/me', methods=['GET'])
 @jwt_required()
-def get_current_user():
-    """Get current user profile with subscription status"""
+def get_profile():
+    """Get current user profile"""
     try:
         user_id = get_jwt_identity()
-        user = User.query.get(user_id)
+        user_service = get_user_service()
         
-        if not user:
+        result = user_service.get_user_profile(user_id)
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'profile': result['profile']
+            }), 200
+        else:
             return jsonify({
                 'success': False,
-                'error': 'User not found'
+                'error': result['error']
             }), 404
-        
-        # Check profile status
-        profile_status = _check_user_profile_status(user)
-        
-        return jsonify({
-            'id': user.id,
-            'username': user.username,
-            'email': user.email,
-            'first_name': user.first_name,
-            'last_name': user.last_name,
-            'personal_phone': user.personal_phone,
-            'signalwire_phone_number': user.signalwire_phone_number,
-            'signalwire_setup_completed': user.signalwire_setup_completed,
-            'signalwire_setup_step': user.signalwire_setup_step,
-            'is_active': user.is_active,
-            'last_login': user.last_login.isoformat() if user.last_login else None,
-            'created_at': user.created_at.isoformat() if user.created_at else None,
-            'trial_phone_expires_at': user.trial_phone_expires_at.isoformat() if user.trial_phone_expires_at else None,
-            'profile_status': profile_status,
-            'banner': profile_status.get('banner_message'),
-            'requires_payment': profile_status.get('requires_payment', False)
-        })
-        
+            
     except Exception as e:
-        logger.error(f"Get user failed: {e}")
+        current_app.logger.error(f"Get profile error: {str(e)}")
         return jsonify({
             'success': False,
-            'error': 'Failed to get user profile'
+            'error': 'Failed to fetch profile'
+        }), 500
+
+@auth_bp.route('/start-trial', methods=['POST'])
+@jwt_required()
+@validate_request_json(StartTrialSchema())
+def start_trial():
+    """Start trial subscription"""
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        user_service = get_user_service()
+        
+        result = user_service.start_trial(user_id, data)
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'trial_ends_at': result['trial_ends_at'],
+                'phone_number': result['phone_number'],
+                'message': result['message']
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 400
+            
+    except Exception as e:
+        current_app.logger.error(f"Start trial error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to start trial'
         }), 500
 
 @auth_bp.route('/logout', methods=['POST'])
 @jwt_required()
 def logout():
-    """Logout user"""
-    try:
-        user_id = get_jwt_identity
-        # You can add logout logic here if needed (blacklist tokens, etc.)
-        # For now, just return success - frontend will clear tokens
-        
-        return jsonify({
-            'success': True,
-            'message': 'Logged out successfully'
-        })
-        
-    except Exception as e:
-        logger.error(f"Logout failed: {e}")
-        return jsonify({
-            'success': False,
-            'error': 'Logout failed'
-        }), 500
-
-@auth_bp.route('/search-numbers', methods=['POST'])
-@jwt_required()
-def search_phone_numbers():
-    """Search available phone numbers for user's subproject"""
-    try:
-        user_id = get_jwt_identity()
-        user = User.query.get(user_id)
-        
-        # Check if user is ready for phone number setup
-        if not user or user.signalwire_setup_step < 1:
-            return jsonify({
-                'success': False,
-                'error': 'User not ready for phone number setup. Please complete registration first.'
-            }), 400
-        
-        data = request.get_json() or {}
-        search_criteria = {
-            'country': data.get('country', 'CA'),
-            'area_code': data.get('area_code'),
-            'locality': data.get('locality'),
-            'limit': data.get('limit', 5)
-        }
-        
-        # Use SignalWire service to search numbers
-        
-        result = signalwire_service.search_available_numbers(user, search_criteria)
-        
-        if result['success']:
-            # Store selection token for purchase
-            user.phone_number_selection_token = result['selection_token']
-            user.phone_number_selection_expires = datetime.utcnow() + timedelta(minutes=15)
-            db.session.commit()
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        logger.error(f"Number search failed: {e}")
-        return jsonify({
-            'success': False,
-            'error': 'Number search failed'
-        }), 500
-
-@auth_bp.route('/purchase-number', methods=['POST'])
-@jwt_required()
-def purchase_phone_number():
-    """Purchase selected phone number and attach to user's subproject"""
-    try:
-        user_id = get_jwt_identity()
-        user = User.query.get(user_id)
-        
-        # Check if user is ready for phone number purchase
-        if not user or user.signalwire_setup_step < 1:
-            return jsonify({
-                'success': False,
-                'error': 'User not ready for phone number purchase'
-            }), 400
-        
-        data = request.get_json()
-        phone_number = data.get('phone_number')
-        selection_token = data.get('selection_token')
-        
-        if not phone_number or not selection_token:
-            return jsonify({
-                'success': False,
-                'error': 'Missing phone number or selection token'
-            }), 400
-        
-        # Validate selection token
-        if (not user.phone_number_selection_token or 
-            user.phone_number_selection_token != selection_token or
-            datetime.utcnow() > user.phone_number_selection_expires):
-            return jsonify({
-                'success': False,
-                'error': 'Invalid or expired selection token'
-            }), 400
-        
-        # Use SignalWire service to purchase number
-        logger.info(f"Purchasing phone number {phone_number} for user {user.id}")
-        if not signalwire_service:
-            return jsonify({
-                'success': False,
-                'error': 'SignalWire service not available'
-            }), 500
-            
-        result = signalwire_service.purchase_and_configure_number(user, phone_number, selection_token)
-        
-        if result['success']:
-            # Update user with phone number details
-            user.signalwire_phone_number = result['phone_number']
-            user.signalwire_phone_number_sid = result['phone_number_sid']
-            user.signalwire_setup_step = 2  # Setup complete
-            user.signalwire_setup_completed = True
-            user.phone_number_selection_token = None  # Clear token
-            user.phone_number_selection_expires = None
-            
-            db.session.commit()
-            
-            logger.info(f"Phone number {result['phone_number']} purchased successfully for user {user.id}")
-            
-            return jsonify({
-                'success': True,
-                'message': 'Phone number purchased successfully',
-                'phone_number': result['phone_number'],
-                'phone_number_sid': result['phone_number_sid'],
-                'webhook_endpoints': result.get('webhook_endpoints', {}),
-                'setup_complete': True
-            })
-        else:
-            return jsonify(result), 400
-        
-    except Exception as e:
-        logger.error(f"Number purchase failed: {e}")
-        return jsonify({
-            'success': False,
-            'error': 'Number purchase failed'
-        }), 500
-
-def _check_user_profile_status(user):
-    """Check user subscription/trial status and determine actions needed"""
-    try:
-        current_time = datetime.utcnow()
-        user = User.query.get(user.id)
-        if not user and not user.is_active:
-            return {
-                'status': 'error',
-                'should_suspend_number': True,
-                'should_activate_number': False,
-                'requires_payment': True,
-                'banner_message': 'NUMBER SUSPENDED - USER NOT FOUND'
-            }   
-        elif not user.subscription.status and not user.trial_active:
-            return {
-                'status': 'inactive',
-                'should_suspend_number': True,
-                'should_activate_number': False,
-                'requires_payment': True,
-                'banner_message': 'NUMBER SUSPENDED - NO SUBSCRIPTION'
-            }
-            
-        
-        # Check trial status
-        trial_expired = False
-        if user.trial_phone_expires_at:
-            trial_expired = current_time > user.trial_phone_expires_at
-        
-        # Determine status and actions
-        if user.has_active_subscription:
-            return {
-                'status': 'active_subscription',
-                'should_suspend_number': False,
-                'should_activate_number': True,
-                'requires_payment': False,
-                'banner_message': None
-            }
-        elif not trial_expired:
-            return {
-                'status': 'trial_active',
-                'should_suspend_number': False,
-                'should_activate_number': True,
-                'requires_payment': False,
-                'banner_message': f"Trial expires {user.trial_phone_expires_at.strftime('%Y-%m-%d')}"
-            }
-        elif user.has_outstanding_balance:
-            return {
-                'status': 'outstanding_balance',
-                'should_suspend_number': True,
-                'should_activate_number': False,
-                'requires_payment': True,
-                'banner_message': 'NUMBER SUSPENDED - PLEASE PAY OUTSTANDING BALANCE'
-            }
-        else:
-            return {
-                'status': 'no_subscription',
-                'should_suspend_number': True,
-                'should_activate_number': False,
-                'requires_payment': True,
-                'banner_message': 'NUMBER SUSPENDED - PLEASE PICK A PLAN OR PAY OUTSTANDING BALANCE'
-            }
-            
-    except Exception as e:
-        logger.error(f"Error checking profile status: {e}")
-        return {
-            'status': 'error',
-            'should_suspend_number': True,
-            'should_activate_number': False,
-            'requires_payment': True,
-            'banner_message': 'NUMBER SUSPENDED - ACCOUNT STATUS UNCLEAR'
-        }
+    """Logout user (client-side token invalidation)"""
+    return jsonify({
+        'success': True,
+        'message': 'Logged out successfully'
+    }), 200

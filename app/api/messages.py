@@ -1,266 +1,190 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models.user import User
-from app.services.integration_service import IntegrationService
-from app.models.messaging import Message, Client
-from app.extensions import db
-from datetime import datetime, timedelta
-from sqlalchemy import func, or_, and_
+from marshmallow import Schema, fields, ValidationError
 
-messages_bp = Blueprint('messages', __name__)
+from app.services import get_messaging_service
+from app.utils.validators import validate_request_json
 
-# UPDATED: All endpoints now use user_id from JWT instead of profile_id
+messaging_bp = Blueprint('messaging', __name__)
 
+class SendMessageSchema(Schema):
+    recipient_number = fields.Str(required=True)
+    content = fields.Str(required=True, validate=lambda x: len(x.strip()) > 0)
+    ai_generated = fields.Bool(missing=False)
 
-@messages_bp.route('', methods=['GET'])
-@jwt_required()
-def get_user_messages():
-    """Get all messages for the current user"""
-    try:
-        user_id = get_jwt_identity()
-        
-        # Get query parameters
-        page = request.args.get('page', 1, type=int)
-        per_page = min(request.args.get('per_page', 50, type=int), 100)
-        direction = request.args.get('direction')  # 'inbound', 'outbound'
-        unread_only = request.args.get('unread', 'false').lower() == 'true'
-        flagged_only = request.args.get('flagged', 'false').lower() == 'true'
-        search = request.args.get('search', '').strip()
-        client_phone = request.args.get('client_phone')
-        
-        # Build base query
-        query = Message.query.filter(Message.user_id == user_id)
-        
-        # Apply filters
-        if direction:
-            query = query.filter(Message.direction == direction)
-        
-        if unread_only:
-            query = query.filter(Message.is_read == False)
-        
-        if flagged_only:
-            query = query.filter(Message.is_flagged == True)
-        
-        if search:
-            search_term = f"%{search}%"
-            query = query.filter(
-                or_(
-                    Message.message_body.ilike(search_term),
-                    Message.sender_number.contains(search),
-                    Message.recipient_number.contains(search)
-                )
-            )
-        
-        if client_phone:
-            query = query.filter(
-                or_(
-                    Message.sender_number == client_phone,
-                    Message.recipient_number == client_phone
-                )
-            )
-        
-        # Order by timestamp descending
-        query = query.order_by(Message.timestamp.desc())
-        
-        # Paginate
-        result = query.paginate(page=page, per_page=per_page, error_out=False)
-        
-        return jsonify({
-            'success': True,
-            'messages': [msg.to_dict() for msg in result.items],
-            'pagination': {
-                'page': page,
-                'per_page': per_page,
-                'total': result.total,
-                'pages': result.pages,
-                'has_next': result.has_next,
-                'has_prev': result.has_prev
-            }
-        }), 200
-        
-    except Exception as e:
-        current_app.logger.error(f"Error getting messages: {str(e)}")
-        return jsonify({'error': 'Failed to get messages'}), 500
+class ClientUpdateSchema(Schema):
+    name = fields.Str(allow_none=True)
+    email = fields.Email(allow_none=True)
+    notes = fields.Str(allow_none=True)
+    ai_enabled = fields.Bool(allow_none=True)
+    ai_personality = fields.Str(allow_none=True)
+    custom_ai_prompt = fields.Str(allow_none=True)
+    tags = fields.List(fields.Str(), allow_none=True)
 
-
-@messages_bp.route('/conversations', methods=['GET'])
+@messaging_bp.route('/conversations', methods=['GET'])
 @jwt_required()
 def get_conversations():
-    """Get recent conversations for the user"""
+    """Get user's conversations"""
     try:
         user_id = get_jwt_identity()
-        limit = min(request.args.get('limit', 20, type=int), 50)
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 20, type=int), 100)
         
-        # Get recent conversations
-        conversations = Message.get_recent_conversations(user_id, limit)
+        messaging_service = get_messaging_service()
+        result = messaging_service.get_conversations(user_id, page, per_page)
         
-        # Format conversations with additional info
-        conversations_data = []
-        for message in conversations:
-            # Get client info
-            client = Client.query.filter_by(phone_number=message.sender_number).first()
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'conversations': result['conversations'],
+                'pagination': result['pagination']
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 400
             
-            # Count unread messages from this client
-            unread_count = Message.query.filter(
-                Message.user_id == user_id,
-                Message.sender_number == message.sender_number,
-                Message.direction == 'inbound',
-                Message.is_read == False
-            ).count()
-            
-            # Get total message count
-            total_count = Message.query.filter(
-                Message.user_id == user_id,
-                or_(
-                    Message.sender_number == message.sender_number,
-                    Message.recipient_number == message.sender_number
-                )
-            ).count()
-            
-            conversation_data = {
-                'last_message': message.to_dict(include_client_info=False),
-                'client': client.to_dict(user_id=user_id) if client else {
-                    'phone_number': message.sender_number,
-                    'name': f"Client {message.sender_number[-4:]}",
-                    'display_name': f"Client {message.sender_number[-4:]}"
-                },
-                'unread_count': unread_count,
-                'total_messages': total_count
-            }
-            conversations_data.append(conversation_data)
-        
-        return jsonify({
-            'success': True,
-            'conversations': conversations_data
-        }), 200
-        
     except Exception as e:
-        current_app.logger.error(f"Error getting conversations: {str(e)}")
-        return jsonify({'error': 'Failed to get conversations'}), 500
+        current_app.logger.error(f"Get conversations error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch conversations'
+        }), 500
 
-
-@messages_bp.route('/<int:message_id>', methods=['GET'])
+@messaging_bp.route('/conversations/<int:client_id>/messages', methods=['GET'])
 @jwt_required()
-def get_message():
-    """Get a specific message"""
+def get_conversation_messages(client_id):
+    """Get messages for specific conversation"""
     try:
         user_id = get_jwt_identity()
-        message_id = request.view_args['message_id']
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 50, type=int), 100)
         
-        message = Message.query.filter(
-            Message.id == message_id,
-            Message.user_id == user_id
-        ).first()
+        messaging_service = get_messaging_service()
+        result = messaging_service.get_conversation_messages(
+            user_id, client_id, page, per_page
+        )
         
-        if not message:
-            return jsonify({'error': 'Message not found'}), 404
-        
-        return jsonify({
-            'success': True,
-            'message': message.to_dict()
-        }), 200
-        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'messages': result['messages'],
+                'client': result['client'],
+                'pagination': result['pagination']
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 404
+            
     except Exception as e:
-        current_app.logger.error(f"Error getting message: {str(e)}")
-        return jsonify({'error': 'Failed to get message'}), 500
-
-
-@messages_bp.route('/<int:message_id>/read', methods=['POST'])
-@jwt_required()
-def mark_message_read():
-    """Mark a message as read"""
-    try:
-        user_id = get_jwt_identity()
-        message_id = request.view_args['message_id']
-        
-        message = Message.query.filter(
-            Message.id == message_id,
-            Message.user_id == user_id
-        ).first()
-        
-        if not message:
-            return jsonify({'error': 'Message not found'}), 404
-        
-        message.mark_as_read()
-        db.session.commit()
-        
+        current_app.logger.error(f"Get conversation messages error: {str(e)}")
         return jsonify({
-            'success': True,
-            'message': 'Message marked as read'
-        }), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Error marking message as read: {str(e)}")
-        return jsonify({'error': 'Failed to mark message as read'}), 500
+            'success': False,
+            'error': 'Failed to fetch messages'
+        }), 500
 
-
-@messages_bp.route('/bulk-read', methods=['POST'])
+@messaging_bp.route('/send', methods=['POST'])
 @jwt_required()
-def mark_messages_read():
-    """Mark multiple messages as read"""
+@validate_request_json(SendMessageSchema())
+def send_message():
+    """Send SMS message"""
     try:
         user_id = get_jwt_identity()
         data = request.get_json()
         
-        if not data or 'message_ids' not in data:
-            return jsonify({'error': 'Message IDs required'}), 400
+        messaging_service = get_messaging_service()
+        result = messaging_service.send_message(
+            user_id=user_id,
+            recipient_number=data['recipient_number'],
+            content=data['content'],
+            ai_generated=data.get('ai_generated', False)
+        )
         
-        message_ids = data['message_ids']
-        if not isinstance(message_ids, list):
-            return jsonify({'error': 'Message IDs must be a list'}), 400
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'message': result['message'],
+                'signalwire_sid': result['signalwire_sid']
+            }), 201
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 400
+            
+    except Exception as e:
+        current_app.logger.error(f"Send message error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to send message'
+        }), 500
+
+@messaging_bp.route('/clients/<int:client_id>', methods=['PUT'])
+@jwt_required()
+@validate_request_json(ClientUpdateSchema())
+def update_client(client_id):
+    """Update client information"""
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json()
         
-        # Update messages
-        updated_count = Message.query.filter(
-            Message.id.in_(message_ids),
-            Message.user_id == user_id
-        ).update({Message.is_read: True}, synchronize_session=False)
+        from app.models import Client
+        client = Client.query.filter_by(id=client_id, user_id=user_id).first()
         
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Client not found'
+            }), 404
+        
+        # Update client fields
+        for field in ['name', 'email', 'notes', 'ai_enabled', 'ai_personality', 'custom_ai_prompt', 'tags']:
+            if field in data:
+                setattr(client, field, data[field])
+        
+        from app.extensions import db
+        client.updated_at = datetime.utcnow()
         db.session.commit()
         
         return jsonify({
             'success': True,
-            'message': f'{updated_count} messages marked as read'
+            'client': client.to_dict(include_stats=True)
         }), 200
         
     except Exception as e:
+        from app.extensions import db
         db.session.rollback()
-        current_app.logger.error(f"Error marking messages as read: {str(e)}")
-        return jsonify({'error': 'Failed to mark messages as read'}), 500
+        current_app.logger.error(f"Update client error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to update client'
+        }), 500
 
-
-@messages_bp.route('/<int:message_id>/flag', methods=['POST'])
+@messaging_bp.route('/messages/<int:message_id>/flag', methods=['POST'])
 @jwt_required()
-def flag_message():
+def flag_message(message_id):
     """Flag a message for review"""
     try:
         user_id = get_jwt_identity()
-        message_id = request.view_args['message_id']
+        data = request.get_json()
+        reasons = data.get('reasons', [])
         
-        message = Message.query.filter(
-            Message.id == message_id,
-            Message.user_id == user_id
-        ).first()
+        from app.models import Message
+        message = Message.query.filter_by(id=message_id, user_id=user_id).first()
         
         if not message:
-            return jsonify({'error': 'Message not found'}), 404
+            return jsonify({
+                'success': False,
+                'error': 'Message not found'
+            }), 404
         
-        data = request.get_json() or {}
-        reason = data.get('reason', 'manual')
-        severity = data.get('severity', 'medium')
+        message.is_flagged = True
+        message.flag_reasons = reasons
         
-        # Flag the message
-        message.mark_as_flagged(reason)
-        
-        # Create detailed flag record
-        flagged_message = FlaggedMessage(
-            message_id=message_id,
-            user_id=user_id,
-            reason=reason,
-            severity=severity,
-            detection_method='manual'
-        )
-        db.session.add(flagged_message)
+        from app.extensions import db
         db.session.commit()
         
         return jsonify({
@@ -269,258 +193,10 @@ def flag_message():
         }), 200
         
     except Exception as e:
+        from app.extensions import db
         db.session.rollback()
-        current_app.logger.error(f"Error flagging message: {str(e)}")
-        return jsonify({'error': 'Failed to flag message'}), 500
-
-
-@messages_bp.route('/<int:message_id>/unflag', methods=['POST'])
-@jwt_required()
-def unflag_message():
-    """Remove flag from a message"""
-    try:
-        user_id = get_jwt_identity()
-        message_id = request.view_args['message_id']
-        
-        message = Message.query.filter(
-            Message.id == message_id,
-            Message.user_id == user_id
-        ).first()
-        
-        if not message:
-            return jsonify({'error': 'Message not found'}), 404
-        
-        # Unflag the message
-        message.is_flagged = False
-        
-        # Remove flag details
-        FlaggedMessage.query.filter_by(message_id=message_id).delete()
-        db.session.commit()
-        
+        current_app.logger.error(f"Flag message error: {str(e)}")
         return jsonify({
-            'success': True,
-            'message': 'Message unflagged successfully'
-        }), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Error unflagging message: {str(e)}")
-        return jsonify({'error': 'Failed to unflag message'}), 500
-
-
-@messages_bp.route('/send', methods=['POST'])
-@jwt_required()
-def send_message():
-    """Send a message to a client"""
-    try:
-        user_id = get_jwt_identity()
-        user = User.query.get(user_id)
-        
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        
-        if not user.is_signalwire_configured():
-            return jsonify({'error': 'SignalWire not configured'}), 400
-        
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'No data provided'}), 400
-        
-        required_fields = ['to_number', 'message']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({'error': f'Missing required field: {field}'}), 400
-        
-        to_number = data['to_number']
-        message_body = data['message']
-        
-        # Find or create client
-        client = Client.find_or_create(to_number, user_id)
-        
-        # Check daily message limit
-        today_count = Message.get_daily_count(user_id)
-        if today_count >= user.daily_message_limit:
-            return jsonify({'error': 'Daily message limit exceeded'}), 429
-        
-        # Create message record
-        message = Message(
-            user_id=user_id,
-            client_id=client.id,
-            sender_number=user.signalwire_phone_number,
-            recipient_number=to_number,
-            message_body=message_body,
-            direction='outbound',
-            status='pending',
-            is_ai_generated=False
-        )
-        db.session.add(message)
-        db.session.flush()  # Get the ID
-        
-        # Send via SignalWire (implement this based on your SignalWire setup)
-        try:
-            user = User.query.get(user_id)
-            if not user or not user.signalwire_phone_number:
-                return jsonify({'error': 'User or SignalWire phone number not found'}), 404
-            signalwire_message = user.send_signalwire_message(to_number, message_body)
-            if not signalwire_message:
-                return jsonify({'error': 'Failed to send message via SignalWire'}), 500
-            
-            signalwire = IntegrationService.get_signalwire_service()
-            message = signalwire.send_sms (
-                from_number = user.signalwire_phone_number,
-                to_number = to_number,
-                body=message_body,
-                user=user,
-                )
-            message.message_sid = signalwire_message.sid
-            message.status = 'sent'  # Temporary - would be set by actual response
-            
-            # Update user message count
-            user.update_message_count(sent=1)
-            
-            db.session.commit()
-            
-            return jsonify({
-                'success': True,
-                'message': 'Message sent successfully',
-                'message_data': message.to_dict()
-            }), 200
-            
-        except Exception as send_error:
-            message.status = 'failed'
-            message.error_message = str(send_error)
-            db.session.commit()
-            
-            current_app.logger.error(f"Failed to send message: {send_error}")
-            return jsonify({'error': 'Failed to send message'}), 500
-        
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Error sending message: {str(e)}")
-        return jsonify({'error': 'Failed to send message'}), 500
-
-
-@messages_bp.route('/stats', methods=['GET'])
-@jwt_required()
-def get_message_stats():
-    """Get message statistics for the user"""
-    try:
-        user_id = get_jwt_identity()
-        
-        # Get date range (default to last 30 days)
-        days = request.args.get('days', 30, type=int)
-        start_date = datetime.utcnow() - timedelta(days=days)
-        
-        # Basic counts
-        total_messages = Message.query.filter(Message.user_id == user_id).count()
-        
-        inbound_count = Message.query.filter(
-            Message.user_id == user_id,
-            Message.direction == 'inbound'
-        ).count()
-        
-        outbound_count = Message.query.filter(
-            Message.user_id == user_id,
-            Message.direction == 'outbound'
-        ).count()
-        
-        ai_generated_count = Message.query.filter(
-            Message.user_id == user_id,
-            Message.is_ai_generated == True
-        ).count()
-        
-        flagged_count = Message.query.filter(
-            Message.user_id == user_id,
-            Message.is_flagged == True
-        ).count()
-        
-        unread_count = Message.count_unread(user_id)
-        
-        # Recent period stats
-        recent_messages = Message.query.filter(
-            Message.user_id == user_id,
-            Message.timestamp >= start_date
-        ).count()
-        
-        recent_inbound = Message.query.filter(
-            Message.user_id == user_id,
-            Message.direction == 'inbound',
-            Message.timestamp >= start_date
-        ).count()
-        
-        recent_outbound = Message.query.filter(
-            Message.user_id == user_id,
-            Message.direction == 'outbound',
-            Message.timestamp >= start_date
-        ).count()
-        
-        # Today's stats
-        today_count = Message.get_daily_count(user_id)
-        
-        # Calculate rates
-        response_rate = round((ai_generated_count / max(inbound_count, 1)) * 100, 1)
-        flag_rate = round((flagged_count / max(total_messages, 1)) * 100, 1)
-        
-        return jsonify({
-            'success': True,
-            'stats': {
-                'total_messages': total_messages,
-                'inbound_count': inbound_count,
-                'outbound_count': outbound_count,
-                'ai_generated_count': ai_generated_count,
-                'flagged_count': flagged_count,
-                'unread_count': unread_count,
-                'today_count': today_count,
-                'response_rate': response_rate,
-                'flag_rate': flag_rate,
-                'recent_period': {
-                    'days': days,
-                    'total_messages': recent_messages,
-                    'inbound': recent_inbound,
-                    'outbound': recent_outbound
-                }
-            }
-        }), 200
-        
-    except Exception as e:
-        current_app.logger.error(f"Error getting message stats: {str(e)}")
-        return jsonify({'error': 'Failed to get message statistics'}), 500
-
-
-@messages_bp.route('/conversation/<phone_number>', methods=['GET'])
-@jwt_required()
-def get_conversation():
-    """Get conversation with a specific phone number"""
-    try:
-        user_id = get_jwt_identity()
-        phone_number = request.view_args['phone_number']
-        
-        limit = min(request.args.get('limit', 50, type=int), 100)
-        
-        # Get conversation messages
-        messages = Message.get_conversation(user_id, phone_number, limit)
-        
-        # Mark unread messages as read
-        unread_messages = [msg for msg in messages if not msg.is_read and msg.direction == 'inbound']
-        for msg in unread_messages:
-            msg.mark_as_read()
-        
-        if unread_messages:
-            db.session.commit()
-        
-        # Get client info
-        client = Client.query.filter_by(phone_number=phone_number).first()
-        
-        return jsonify({
-            'success': True,
-            'messages': [msg.to_dict(include_client_info=False) for msg in reversed(messages)],
-            'client': client.to_dict(user_id=user_id) if client else {
-                'phone_number': phone_number,
-                'name': f"Client {phone_number[-4:]}",
-                'display_name': f"Client {phone_number[-4:]}"
-            }
-        }), 200
-        
-    except Exception as e:
-        current_app.logger.error(f"Error getting conversation: {str(e)}")
-        return jsonify({'error': 'Failed to get conversation'}), 500
+            'success': False,
+            'error': 'Failed to flag message'
+        }), 500

@@ -1,356 +1,269 @@
-"""
-Billing Integration for Trial to Subscription Conversion
-Handles reactivation of SignalWire services after payment
-"""
 
-from flask import Blueprint, request, jsonify
-from flask_cors import cross_origin
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.extensions import db
-from app.models.user import User
-from app.models.billing import Subscription
-from app.services.billing_service import BillingService
-from app.services.integration_service import IntegrationService
-from app.tasks.trial_tasks import reactivate_user_after_subscription
-try:
-    from app.tasks.trial_tasks import reactivate_user_after_subscription
-except ImportError:
-    # Fallback or mock for development if the module does not exist
-    def reactivate_user_after_subscription(*args, **kwargs):
-        class DummyTask:
-            id = "dummy-task-id"
-            def delay(self, *a, **kw):
-                return self
-        return DummyTask()
-from app.services.signalwire_service import SignalWireService
-from datetime import datetime
-import logging
+from marshmallow import Schema, fields
+
+from app.services import get_billing_service
+from app.utils.validators import validate_request_json
 
 billing_bp = Blueprint('billing', __name__)
 
-@billing_bp.route('/activate-subscription', methods=['POST'])
-@jwt_required()
-@cross_origin()
-def activate_subscription():
-    """
-    Activate user subscription and reactivate SignalWire services
-    Called after successful payment processing
-    """
-    try:
-        current_user_id = get_jwt_identity()
-        data = request.get_json() or {}
-        
-        user = User.query.get(current_user_id)
-        if not user:
-            return jsonify({
-                'success': False,
-                'error': 'User not found'
-            }), 404
-        
-        subscription_plan_id = data.get('subscription_plan_id')
-        payment_method_id = data.get('payment_method_id')
-        stripe_subscription_id = data.get('stripe_subscription_id')
-        
-        if not all([subscription_plan_id, payment_method_id]):
-            return jsonify({
-                'success': False,
-                'error': 'Missing required subscription details'
-            }), 400
-        
-        logging.info(f"🔄 Activating subscription for user {current_user_id}")
-        
-        # Create subscription record
-        subscription = Subscription(
-            user_id=current_user_id,
-            plan_id=subscription_plan_id,
-            stripe_subscription_id=stripe_subscription_id,
-            status='active',
-            current_period_start=datetime.utcnow(),
-            payment_method_id=payment_method_id
-        )
-        
-        db.session.add(subscription)
-        db.session.flush()
-        
-        # Update user status immediately for quick response
-        user.subscription_active = True
-        user.subscription_plan_id = subscription_plan_id
-        user.trial_status = 'converted' if user.is_trial else 'not_applicable'
-        
-        db.session.commit()
-        
-        # Trigger background reactivation of SignalWire services
-        reactivate_task = reactivate_user_after_subscription.delay(
-            user_id=current_user_id,
-            subscription_plan_id=subscription_plan_id
-        )
-        
-        # Get current SignalWire status
-        signalwire_status = "unknown"
-        if user.signalwire_phone_sid:
-            try:
-                signalwire = IntegrationService.get_signalwire_service()
-                
-                phone_status = signalwire.get_phone_number_status(user.signalwire_phone_sid)
-                signalwire_status = phone_status.get('status', 'unknown')
-            except Exception as e:
-                logging.warning(f"Could not get phone status: {e}")
-        
-        return jsonify({
-            'success': True,
-            'message': 'Subscription activated successfully!',
-            'subscription': {
-                'id': subscription.id,
-                'plan_id': subscription_plan_id,
-                'status': 'active',
-                'activated_at': subscription.current_period_start.isoformat()
-            },
-            'user': {
-                'id': user.id,
-                'subscription_active': True,
-                'trial_status': user.trial_status
-            },
-            'signalwire': {
-                'phone_number': user.signalwire_phone_number,
-                'current_status': signalwire_status,
-                'reactivation_task_id': reactivate_task.id,
-                'reactivation_in_progress': True
-            }
-        })
-        
-    except Exception as e:
-        db.session.rollback()
-        logging.error(f"❌ Subscription activation failed for user {current_user_id}: {e}")
-        return jsonify({
-            'success': False,
-            'error': 'Subscription activation failed'
-        }), 500
+class AddPaymentMethodSchema(Schema):
+    payment_method_id = fields.Str(required=True)
+    is_default = fields.Bool(missing=False)
 
-@billing_bp.route('/reactivation-status/<task_id>', methods=['GET'])
+class CreateSubscriptionSchema(Schema):
+    plan_id = fields.Int(required=True)
+    billing_cycle = fields.Str(validate=lambda x: x in ['monthly', 'annual'], missing='monthly')
+
+@billing_bp.route('/subscription', methods=['GET'])
 @jwt_required()
-def get_reactivation_status(task_id):
-    """
-    Check status of SignalWire reactivation task
-    """
+def get_subscription():
+    """Get user's current subscription"""
     try:
-        from celery.result import AsyncResult
+        user_id = get_jwt_identity()
+        billing_service = get_billing_service()
         
-        result = AsyncResult(task_id)
+        result = billing_service.get_user_subscription(user_id)
         
-        if result.ready():
-            task_result = result.get()
+        if result['success']:
             return jsonify({
                 'success': True,
-                'task_status': 'completed',
-                'result': task_result
-            })
+                'subscription': result['subscription'],
+                'has_subscription': result['has_subscription']
+            }), 200
         else:
             return jsonify({
-                'success': True,
-                'task_status': 'pending',
-                'message': 'SignalWire reactivation in progress...'
-            })
+                'success': False,
+                'error': result['error']
+            }), 400
             
     except Exception as e:
-        logging.error(f"Error checking reactivation status: {e}")
+        current_app.logger.error(f"Get subscription error: {str(e)}")
         return jsonify({
             'success': False,
-            'error': 'Could not check reactivation status'
+            'error': 'Failed to fetch subscription'
         }), 500
 
-@billing_bp.route('/trial-to-subscription-flow/<int:user_id>', methods=['POST'])
+@billing_bp.route('/subscription', methods=['POST'])
 @jwt_required()
-@cross_origin()
-def complete_trial_conversion(user_id):
-    """
-    Complete the trial to subscription conversion flow
-    Handles the entire process from payment to SignalWire reactivation
-    """
+@validate_request_json(CreateSubscriptionSchema())
+def create_subscription():
+    """Create new subscription"""
     try:
-        current_user_id = get_jwt_identity()
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        billing_service = get_billing_service()
         
-        # Ensure user can only convert their own trial
-        if current_user_id != user_id:
+        result = billing_service.create_subscription(
+            user_id=user_id,
+            plan_id=data['plan_id'],
+            billing_cycle=data['billing_cycle']
+        )
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'subscription': result['subscription']
+            }), 201
+        else:
             return jsonify({
                 'success': False,
-                'error': 'Unauthorized'
-            }), 403
-        
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({
-                'success': False,
-                'error': 'User not found'
-            }), 404
-        
-        data = request.get_json() or {}
-        
-        # Validate that user is eligible for conversion
-        if user.subscription_active:
-            return jsonify({
-                'success': False,
-                'error': 'User already has active subscription'
+                'error': result['error']
             }), 400
-        
-        logging.info(f"🔄 Starting trial conversion for user {user_id}")
-        
-        # Step 1: Process payment (integrate with your payment processor)
-        payment_result = process_subscription_payment(
-            user_id=user_id,
-            plan_id=data.get('plan_id'),
-            payment_method=data.get('payment_method')
-        )
-        
-        if not payment_result['success']:
-            return jsonify({
-                'success': False,
-                'error': 'Payment processing failed',
-                'payment_error': payment_result['error']
-            }), 400
-        
-        # Step 2: Create subscription
-        subscription = Subscription(
-            user_id=user_id,
-            plan_id=data.get('plan_id'),
-            stripe_subscription_id=payment_result.get('subscription_id'),
-            status='active',
-            current_period_start=datetime.utcnow()
-        )
-        
-        db.session.add(subscription)
-        
-        # Step 3: Update user
-        user.subscription_active = True
-        user.subscription_plan_id = data.get('plan_id')
-        user.trial_status = 'converted'
-        user.trial_converted_at = datetime.utcnow()
-        
-        db.session.commit()
-        
-        # Step 4: Reactivate SignalWire services
-        reactivation_result = reactivate_user_after_subscription.delay(
-            user_id=user_id,
-            subscription_plan_id=data.get('plan_id')
-        )
-        
-        return jsonify({
-            'success': True,
-            'message': 'Trial conversion completed successfully!',
-            'conversion': {
-                'user_id': user_id,
-                'converted_at': user.trial_converted_at.isoformat(),
-                'plan_id': data.get('plan_id'),
-                'subscription_id': subscription.id
-            },
-            'signalwire': {
-                'phone_number': user.signalwire_phone_number,
-                'reactivation_task_id': reactivation_result.id,
-                'expected_active_in': '1-2 minutes'
-            },
-            'next_steps': [
-                'Your phone number is being reactivated',
-                'SMS automation will resume shortly',
-                'You will receive a confirmation email'
-            ]
-        })
-        
+            
     except Exception as e:
-        db.session.rollback()
-        logging.error(f"❌ Trial conversion failed for user {user_id}: {e}")
+        current_app.logger.error(f"Create subscription error: {str(e)}")
         return jsonify({
             'success': False,
-            'error': 'Trial conversion failed'
+            'error': 'Failed to create subscription'
         }), 500
 
-@billing_bp.route('/user-status/<int:user_id>', methods=['GET'])
+@billing_bp.route('/subscription/cancel', methods=['POST'])
 @jwt_required()
-def get_user_billing_status(user_id):
-    """
-    Get complete billing and SignalWire status for a user
-    """
+def cancel_subscription():
+    """Cancel user's subscription"""
     try:
-        current_user_id = get_jwt_identity()
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        reason = data.get('reason', 'User requested')
         
-        # Users can only check their own status (unless admin)
-        if current_user_id != user_id:
+        billing_service = get_billing_service()
+        result = billing_service.cancel_subscription(user_id, reason)
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'subscription': result['subscription'],
+                'message': result['message']
+            }), 200
+        else:
             return jsonify({
                 'success': False,
-                'error': 'Unauthorized'
-            }), 403
-        
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({
-                'success': False,
-                'error': 'User not found'
-            }), 404
-        
-        # Get SignalWire status
-        signalwire_status = None
-        if user.signalwire_phone_sid:
-            try:
-                signalwire = IntegrationService.get_signalwire_service()
-                signalwire_status = signalwire.get_phone_number_status(user.signalwire_phone_sid)
-            except Exception as e:
-                logging.warning(f"Could not get SignalWire status: {e}")
-        
-        # Calculate trial info
-        trial_info = None
-        if user.is_trial and user.trial_end_date:
-            remaining_time = user.trial_end_date - datetime.utcnow()
-            trial_info = {
-                'active': user.trial_status == 'active',
-                'status': user.trial_status,
-                'days_remaining': max(0, remaining_time.days),
-                'end_date': user.trial_end_date.isoformat(),
-                'can_convert': user.trial_status in ['active', 'expired']
-            }
-        
-        return jsonify({
-            'success': True,
-            'user': {
-                'id': user.id,
-                'email': user.email,
-                'subscription_active': user.subscription_active,
-                'subscription_plan_id': user.subscription_plan_id
-            },
-            'trial': trial_info,
-            'signalwire': {
-                'phone_number': user.signalwire_phone_number,
-                'setup_completed': user.signalwire_setup_completed,
-                'number_active': user.signalwire_number_active,
-                'status': signalwire_status['status'] if signalwire_status else 'unknown'
-            },
-            'billing_status': 'trial' if user.is_trial else ('active' if user.subscription_active else 'inactive')
-        })
-        
+                'error': result['error']
+            }), 400
+            
     except Exception as e:
-        logging.error(f"Error getting user status: {e}")
+        current_app.logger.error(f"Cancel subscription error: {str(e)}")
         return jsonify({
             'success': False,
-            'error': 'Could not get user status'
+            'error': 'Failed to cancel subscription'
         }), 500
 
-def process_subscription_payment(user_id, plan_id, payment_method):
-    """
-    Process subscription payment - integrate with your payment processor
-    This is a placeholder - replace with your actual payment processing
-    """
+@billing_bp.route('/payment-methods', methods=['GET'])
+@jwt_required()
+def get_payment_methods():
+    """Get user's payment methods"""
     try:
-        # Integrate with Stripe, PayPal, etc.
-        # This is just a placeholder
-        logging.info(f"Processing payment for user {user_id}, plan {plan_id}")
+        user_id = get_jwt_identity()
+        billing_service = get_billing_service()
         
-        # Simulate successful payment
-        return {
+        result = billing_service.get_payment_methods(user_id)
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'payment_methods': result['payment_methods']
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 400
+            
+    except Exception as e:
+        current_app.logger.error(f"Get payment methods error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch payment methods'
+        }), 500
+
+@billing_bp.route('/payment-methods', methods=['POST'])
+@jwt_required()
+@validate_request_json(AddPaymentMethodSchema())
+def add_payment_method():
+    """Add payment method"""
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        billing_service = get_billing_service()
+        
+        result = billing_service.add_payment_method(user_id, data)
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'payment_method': result['payment_method']
+            }), 201
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 400
+            
+    except Exception as e:
+        current_app.logger.error(f"Add payment method error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to add payment method'
+        }), 500
+
+@billing_bp.route('/usage', methods=['GET'])
+@jwt_required()
+def get_usage():
+    """Get user's usage summary"""
+    try:
+        user_id = get_jwt_identity()
+        days = request.args.get('days', 30, type=int)
+        
+        billing_service = get_billing_service()
+        result = billing_service.get_usage_summary(user_id, days)
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'usage_summary': result['usage_summary']
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 400
+            
+    except Exception as e:
+        current_app.logger.error(f"Get usage error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch usage'
+        }), 500
+
+@billing_bp.route('/usage/limits', methods=['GET'])
+@jwt_required()
+def check_usage_limits():
+    """Check user's usage limits"""
+    try:
+        user_id = get_jwt_identity()
+        billing_service = get_billing_service()
+        
+        result = billing_service.check_usage_limits(user_id)
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'within_limits': result['within_limits'],
+                'limits': result.get('limits'),
+                'current_usage': result.get('current_usage'),
+                'reason': result.get('reason')
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 400
+            
+    except Exception as e:
+        current_app.logger.error(f"Check usage limits error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to check usage limits'
+        }), 500
+
+@billing_bp.route('/plans', methods=['GET'])
+def get_subscription_plans():
+    """Get available subscription plans"""
+    try:
+        from app.models import SubscriptionPlan
+        
+        plans = SubscriptionPlan.query.filter_by(status='active')\
+            .order_by(SubscriptionPlan.sort_order, SubscriptionPlan.monthly_price).all()
+        
+        return jsonify({
             'success': True,
-            'subscription_id': f'sub_{user_id}_{plan_id}',
-            'payment_id': f'pay_{user_id}_{datetime.utcnow().timestamp()}'
-        }
+            'plans': [plan.to_dict() for plan in plans]
+        }), 200
         
     except Exception as e:
-        logging.error(f"Payment processing failed: {e}")
-        return {
+        current_app.logger.error(f"Get plans error: {str(e)}")
+        return jsonify({
             'success': False,
-            'error': str(e)
-        }
+            'error': 'Failed to fetch plans'
+        }), 500
+
+@billing_bp.route('/webhooks/stripe', methods=['POST'])
+def stripe_webhook():
+    """Handle Stripe webhooks"""
+    try:
+        payload = request.get_data()
+        signature = request.headers.get('stripe-signature')
+        
+        billing_service = get_billing_service()
+        result = billing_service.process_stripe_webhook(payload, signature)
+        
+        if result['success']:
+            return jsonify({'received': True}), 200
+        else:
+            return jsonify({'error': result['error']}), 400
+            
+    except Exception as e:
+        current_app.logger.error(f"Stripe webhook error: {str(e)}")
+        return jsonify({'error': 'Webhook processing failed'}), 400
