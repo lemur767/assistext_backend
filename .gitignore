@@ -21,7 +21,8 @@ build/
 # Flask
 instance/
 .webassets-cache
-
+/venv
+venv/
 # Database
 *.db
 *.sqlite3
@@ -53,6 +54,8 @@ backup_*/
 *.pem
 *.key
 *.crt
+
+
 
 # Sensitive data
 secrets/

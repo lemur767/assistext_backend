@@ -2,8 +2,8 @@ from .user_service import UserService
 from .billing_service import BillingService
 from .messaging_service import MessagingService
 from .signalwire_service import SignalWireService
-from .usage_service import UsageService
-from .notification_service import NotificationService
+from app.services.usage_tracker import UsageTracker
+
 
 # Service Factory Pattern
 def get_user_service():
@@ -18,8 +18,7 @@ def get_messaging_service():
 def get_signalwire_service():
     return SignalWireService()
 
-def get_usage_service():
-    return UsageService()
+def get_usage_tracker():
+    return UsageTracker()
 
-def get_notification_service():
-    return NotificationService()
+

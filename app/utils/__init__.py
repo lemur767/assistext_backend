@@ -1,8 +1,4 @@
-# app/utils/__init__.py
-"""
-Utilities package for SMS AI Responder
-Contains helper functions for external services
-"""
+
 
 # Import SignalWire helpers
 try:
@@ -22,21 +18,6 @@ except ImportError as e:
     SIGNALWIRE_AVAILABLE = False
     print(f"Warning: SignalWire helpers not available: {e}")
 
-# Import Ollama LLM helpers
-try:
-    from .ollama_helpers import (
-        get_ollama_client,
-        generate_ai_response,
-        chat_completion,
-        is_llm_available,
-        get_llm_health,
-        OllamaClient
-    )
-    
-    OLLAMA_AVAILABLE = True
-except ImportError as e:
-    OLLAMA_AVAILABLE = False
-    print(f"Warning: Ollama helpers not available: {e}")
 
 # Import Stripe client
 try:
@@ -75,16 +56,6 @@ if SIGNALWIRE_AVAILABLE:
         'configure_webhook'
     ])
 
-# Add Ollama exports
-if OLLAMA_AVAILABLE:
-    __all__.extend([
-        'get_ollama_client',
-        'generate_ai_response',
-        'chat_completion', 
-        'is_llm_available',
-        'get_llm_health',
-        'OllamaClient'
-    ])
 
 # Add Stripe exports
 if STRIPE_AVAILABLE:
@@ -106,14 +77,7 @@ def send_message(from_number, to_number, body):
     else:
         raise RuntimeError("No SMS service available")
 
-def generate_text_response(prompt, system_prompt=None, **kwargs):
-    """
-    Generate text response using available LLM service
-    """
-    if OLLAMA_AVAILABLE:
-        return generate_ai_response(prompt, system_prompt, **kwargs)
-    else:
-        raise RuntimeError("No LLM service available")
+
 
 def get_stripe_client():
     """
