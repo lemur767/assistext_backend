@@ -3,7 +3,8 @@ from flask import Flask
 import logging
 import os
 import sys
-
+from dotenv import load_dotenv
+load_dotenv()  # Load environment variables from .env file if present
 # Import extensions first
 from app.extensions import db, migrate, jwt, mail, init_redis, get_redis
 
