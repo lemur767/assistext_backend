@@ -3,10 +3,11 @@ from flask import Flask
 import logging
 import os
 import sys
+from dotenv import load_dotenv
 
 # Import extensions first
 from app.extensions import db, migrate, jwt, mail, init_redis, get_redis
-
+load_dotenv()
 def create_app():
     """Flask application factory - NO config parameter needed"""
     app = Flask(__name__)
@@ -36,9 +37,7 @@ def create_app(config_name='production'):
     """
     app = Flask(__name__)
     
-    # Load configuration
-    _load_configuration(app, config_name)
-    
+      
     # Initialize extensions
     _init_extensions(app)
     
@@ -55,11 +54,11 @@ def create_app(config_name='production'):
 def _configure_app(app):
     """Configure the Flask app with simple settings"""
     # Basic Flask settings
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
     
     # Database settings
-    database_url = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
-    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    database_url = os.environ.get('DATABASE_URL', 'postgresql://app_user:Assistext2025Secure@localhost:5432/assistext_prod')
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://app_user:Assistext2025Secure@localhost:5432/assistext_prod'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         'pool_recycle': 300,
