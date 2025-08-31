@@ -22,6 +22,23 @@ def create_app():
         handlers=[logging.StreamHandler(sys.stdout)]
     )
     app.logger.setLevel(logging.INFO)
+
+
+
+def create_app(config_name='production'):
+    """
+    Create Flask application with consolidated configuration
+    
+    Args:
+        config_name: Configuration environment (development, testing, production)
+    
+    Returns:
+        Flask application instance
+    """
+    app = Flask(__name__)
+    
+    # Load configuration
+    _load_configuration(app, config_name)
     
     # Initialize extensions
     _init_extensions(app)
