@@ -55,6 +55,8 @@ backup_*/
 *.key
 *.crt
 
+
+
 # Sensitive data
 secrets/
 credentials/

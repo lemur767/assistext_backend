@@ -1,6 +1,8 @@
-# app/extensions.py - Fixed Flask Extensions
+# =============================================================================
+# app/extensions.py
 """
-Flask Extensions - Centralized extension initialization
+FLASK EXTENSIONS - CORRECTED VERSION
+Centralized extension initialization for PostgreSQL environment
 """
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -9,7 +11,7 @@ from flask_jwt_extended import JWTManager
 from flask_mail import Mail
 import redis
 
-# Initialize extensions without app context
+# Initialize extensions
 db = SQLAlchemy()
 migrate = Migrate()
 jwt = JWTManager()
