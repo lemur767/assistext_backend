@@ -21,8 +21,6 @@ def create_app():
         handlers=[logging.StreamHandler(sys.stdout)]
     )
     app.logger.setLevel(logging.INFO)
-<<<<<<< Updated upstream
-=======
 
 
 
@@ -40,8 +38,6 @@ def create_app(config_name='production'):
     
     # Load configuration
     _load_configuration(app, config_name)
->>>>>>> bd01a0e22e90682f88e9ce2ac7bd540a42c822d2
->>>>>>> Stashed changes
     
     # Initialize extensions
     _init_extensions(app)
