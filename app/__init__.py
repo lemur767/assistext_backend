@@ -1,4 +1,4 @@
-# app/__init__.py - FINAL WORKING VERSION
+# app/__init__.py - CORRECTED VERSION
 from flask import Flask
 import logging
 import os
@@ -92,7 +92,7 @@ def _init_extensions(app):
         jwt.init_app(app)
         app.logger.info("JWT initialized")
         
-        CORS.init_app(app)
+        CORS(app)
         app.logger.info("CORS initialized")
         
     except Exception as e:
@@ -100,7 +100,6 @@ def _init_extensions(app):
         # Don't raise during migrations - let them complete
         if not _is_flask_migration():
             raise
-
 
 def _register_blueprints(app):
     """Register application blueprints"""
