@@ -4,11 +4,9 @@ import logging
 import os
 import sys
 from dotenv import load_dotenv
-<<<<<<< HEAD
 
-=======
+
 load_dotenv()  # Load environment variables from .env file if present
->>>>>>> refs/remotes/origin/main
 # Import extensions first
 from app.extensions import db, migrate, jwt, mail, init_redis, get_redis
 load_dotenv()
