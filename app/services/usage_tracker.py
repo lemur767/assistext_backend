@@ -7,12 +7,9 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from sqlalchemy import func, and_, or_
 from app.extensions import db
-from app.models.subscription import Subscription
-from app.models.usage import  UsageOverage, UseageRecord
+from app.models.billing import Subscription, UsageRecord
 
 
-
-from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 

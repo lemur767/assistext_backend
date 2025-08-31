@@ -1,25 +1,25 @@
-from .user_service import UserService
-from .billing_service import BillingService
-from .messaging_service import MessagingService
-from .signalwire_service import SignalWireService
-from .usage_service import UsageService
-from .notification_service import NotificationService
 
 # Service Factory Pattern
 def get_user_service():
+    from .user_service import UserService
     return UserService()
 
 def get_billing_service():
+    from .billing_service import BillingService
     return BillingService()
 
 def get_messaging_service():
+    from .messaging_service import MessagingService
     return MessagingService()
 
-def get_signalwire_service():
-    return SignalWireService()
+def get_sms_conversation_service():
+    from .sms_conversation_service import SMSConversationService
+    return SMSConversationService()
 
-def get_usage_service():
-    return UsageService()
 
-def get_notification_service():
-    return NotificationService()
+__all__ = [
+    "get_user_service",
+    "get_billing_service",
+    "get_messaging_service",
+    "get_sms_conversation_service",
+]

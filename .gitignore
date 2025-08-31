@@ -21,7 +21,8 @@ build/
 # Flask
 instance/
 .webassets-cache
-
+/venv
+venv/
 # Database
 *.db
 *.sqlite3
@@ -75,3 +76,4 @@ yarn.lock
 # Production builds
 dist/
 build/
+.bmad*

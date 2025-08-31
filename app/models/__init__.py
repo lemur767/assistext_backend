@@ -171,10 +171,10 @@ class SubscriptionPlan(db.Model):
     status = db.Column(db.String(20), default='active')  # active, inactive, archived
     
     # Pricing
-    monthly_price = db.Column(db.Decimal(10, 2), nullable=False)
-    annual_price = db.Column(db.Decimal(10, 2))
+    monthly_price = db.Column(db.Float(10, 2), nullable=False)
+    annual_price = db.Column(db.Float(10, 2))
     currency = db.Column(db.String(3), default='USD')
-    setup_fee = db.Column(db.Decimal(10, 2), default=0)
+    setup_fee = db.Column(db.Float(10, 2), default=0)
     
     # Trial
     trial_period_days = db.Column(db.Integer, default=14)
@@ -239,7 +239,7 @@ class Subscription(db.Model):
     ended_at = db.Column(db.DateTime)
     
     # Financial
-    amount = db.Column(db.Decimal(10, 2), nullable=False)
+    amount = db.Column(db.Float(10, 2), nullable=False)
     currency = db.Column(db.String(3), default='USD')
     
     # Stripe Integration
@@ -492,15 +492,15 @@ class UsageRecord(db.Model):
     # Usage Details
     metric_type = db.Column(db.String(50), nullable=False)  # sms_sent, sms_received, ai_responses, etc.
     quantity = db.Column(db.Integer, default=1)
-    unit_cost = db.Column(db.Decimal(10, 4))
-    total_cost = db.Column(db.Decimal(10, 2))
+    unit_cost = db.Column(db.Float(10, 4))
+    total_cost = db.Column(db.Float(10, 2))
     
     # Reference Information
     resource_id = db.Column(db.String(100))  # Message ID, etc.
     resource_type = db.Column(db.String(50))  # message, ai_response, etc.
     
     # Metadata
-    metadata = db.Column(JSONB, default={})
+    useage_metadata = db.Column(JSONB, default={})
     
     # Billing Period
     billing_period_start = db.Column(db.DateTime, nullable=False)
@@ -529,7 +529,7 @@ class UsageRecord(db.Model):
             'billing_period_start': self.billing_period_start.isoformat(),
             'billing_period_end': self.billing_period_end.isoformat(),
             'created_at': self.created_at.isoformat(),
-            'metadata': self.metadata
+            'useage_metadata': self.useage_metadata
         }
 
 # =============================================================================
@@ -549,11 +549,11 @@ class Invoice(db.Model):
     status = db.Column(db.String(20), nullable=False)  # draft, open, paid, void
     
     # Amounts
-    subtotal = db.Column(db.Decimal(10, 2), nullable=False)
-    tax_amount = db.Column(db.Decimal(10, 2), default=0)
-    discount_amount = db.Column(db.Decimal(10, 2), default=0)
-    total = db.Column(db.Decimal(10, 2), nullable=False)
-    amount_paid = db.Column(db.Decimal(10, 2), default=0)
+    subtotal = db.Column(db.Float(10, 2), nullable=False)
+    tax_amount = db.Column(db.Float(10, 2), default=0)
+    discount_amount = db.Column(db.Float(10, 2), default=0)
+    total = db.Column(db.Float(10, 2), nullable=False)
+    amount_paid = db.Column(db.Float(10, 2), default=0)
     currency = db.Column(db.String(3), default='USD')
     
     # Dates

@@ -7,9 +7,8 @@ import stripe
 
 from app.extensions import db
 from app.models.user import User
-from app.models.subscription import Subscription, SubscriptionPlan
-from app.models.billing import PaymentMethod
-from app.services.signalwire_service import SignalWireService
+from app.models.billing import Subscription, SubscriptionPlan, PaymentMethod
+from app.services.sms_conversation_service import SMSConversationService
 from app.services.payment_processor import PaymentProcessor
 
 logger = logging.getLogger(__name__)

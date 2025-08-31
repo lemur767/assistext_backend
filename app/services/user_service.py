@@ -7,9 +7,8 @@ from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models import User, Subscription, SubscriptionPlan, Client
-from app.services.signalwire_service import SignalWireService
+
 from app.services.billing_service import BillingService
-from app.services.notification_service import NotificationService
 from app.utils.validators import validate_email, validate_phone_number
 
 
